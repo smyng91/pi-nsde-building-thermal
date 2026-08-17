@@ -44,12 +44,22 @@ Fourier `μ_q` and `σ_q` have an L2 / log prior so latent occupancy cannot free
 
 ## Energy-balance SDE
 
-Indoor temperature `T` and a latent internal-gain / occupancy state `Q_int`:
+Indoor temperature $T$ and a latent internal-gain / occupancy state $`Q_{\mathrm{int}}`$:
 
-```
-dT      = (1/C) [ UA_eff (T_a - T) + A_s I + β (ω_a - ω_i) + Q_rated u_on + Q_int + r_θ(u) ] dt
-          + σ_T(u) dW_T
-dQ_int  = κ (μ(t) - Q_int) dt + σ_q dW_q
+```math
+\begin{aligned}
+\mathrm{d}T
+&=
+\frac{1}{C}\bigl[
+UA_{\mathrm{eff}}(T_a-T)+A_s I+\beta(\omega_a-\omega_i)
++Q_{\mathrm{rated}} u_{\mathrm{on}}+Q_{\mathrm{int}}+r_\theta(\mathbf{u})
+\bigr]\,\mathrm{d}t
++\sigma_T(\mathbf{u})\,\mathrm{d}W_T, \\
+\mathrm{d}Q_{\mathrm{int}}
+&=
+\kappa\bigl(\mu(t)-Q_{\mathrm{int}}\bigr)\,\mathrm{d}t
++\sigma_q\,\mathrm{d}W_q.
+\end{aligned}
 ```
 
 | Symbol | Role |
@@ -65,11 +75,16 @@ dQ_int  = κ (μ(t) - Q_int) dt + σ_q dW_q
 
 **Observation model (thermostat interval average):**
 
-```
-ȳ_k = (1/Δ) ∫_{t_{k-1}}^{t_k} T(s) ds + e_k ,    e_k ~ N(0, σ_y²)
+```math
+\bar y_k
+=
+\frac{1}{\Delta}\int_{t_{k-1}}^{t_k} T(s)\,\mathrm{d}s
++ e_k,
+\qquad
+e_k\sim\mathcal{N}(0,\sigma_y^2).
 ```
 
-not a point sample `T(t_k)`. The **training** likelihood is the Gaussian Kalman filter of the Euler–Maruyama discretisation, observing the mean of the substeps in each 5-minute interval. The **holdout `T` metric** does not use that update.
+not a point sample $`T(t_k)`$. The **training** likelihood is the Gaussian Kalman filter of the Euler–Maruyama discretisation, observing the mean of the substeps in each 5-minute interval. The **holdout `T` metric** does not use that update.
 
 ## Uncertainty quantification
 
@@ -124,7 +139,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Package demo (digital twin, unknown \(Q_\mathrm{rated}\)):
+Package demo (digital twin, unknown $`Q_{\mathrm{rated}}`$):
 
 ```bash
 .\.venv\Scripts\python.exe -m pinn_building.example --q-rated unknown

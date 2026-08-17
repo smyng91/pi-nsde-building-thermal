@@ -2,8 +2,8 @@
 
 Training and inference on a thermostat/weather CSV. Indoor temperature is
 the measurement, not the success metric: the score that matters is
-**holdout open-loop** \(T\) with frozen \(C\), \(R\), and (default)
-learned \(Q_\mathrm{rated}\).
+**holdout open-loop** $T$ with frozen $C$, $R$, and (default)
+learned $`Q_{\mathrm{rated}}`$.
 
 ```bash
 .\.venv\Scripts\python.exe examples/generate_synthetic.py
@@ -25,7 +25,7 @@ points. Time must already be chronological (no shuffled rows).
 | `generate_synthetic.py` | Digital-twin CSV (not a lab trace) |
 | `train_csv.py` | Two-stage ID, chronological holdout, checkpoint |
 | `infer_csv.py` | Open-loop / holdout / filter diagnostic |
-| `run_demo.py` | Generate → train (unknown \(Q_\mathrm{rated}\)) → holdout infer |
+| `run_demo.py` | Generate → train (unknown $`Q_{\mathrm{rated}}`$) → holdout infer |
 
 Default `--q-rated unknown`: the identifier sees **on/off / runtime
 fraction only** and learns rated capacity. `--q-rated known` is the
