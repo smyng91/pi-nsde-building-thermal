@@ -16,7 +16,7 @@ Indoor temperature is the **measurement**, not the result. Overlaying a Kalman m
 
 ## Identifiability (honest)
 
-On heating intervals, `Q_rated` and `C` both scale `Q/C` in `dT/dt = (Q_rated u_on)/C + …`, so they alias if the heater is always on. Occupied/setback **off** intervals give a free-response time constant (`RC` / `UA/C`). Wind-inflated UA and occupancy structure give extra scale, but they do not make `Q_rated` as clean as metered kW. We keep two-stage training, chronological holdout, no hidden `Q_int`, and we do **not** fabricate easier excitation.
+On heating intervals, `Q_rated` and `C` both scale `Q/C` in `dT/dt = (Q_rated u_on)/C + …`, so they alias if the heater is rarely off. Occupied/setback **off** intervals give a free-response time constant (`RC` / `UA/C`). On the default 7-day winter twin, unknown-`Q_rated` MAP errors are large (`C` ~47%, `Q_rated` ~45%) while holdout open-loop `T` RMSE stays ~0.11 K — that is why indoor `T` is not the score. Wind-inflated UA and occupancy structure give extra scale, but they do not make `Q_rated` as clean as metered kW. We keep two-stage training, chronological holdout, no hidden `Q_int`, and we do **not** fabricate easier excitation.
 
 ## Evaluation protocol (no leakage)
 
