@@ -16,10 +16,10 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 
-from pinn_building.model import ModelParams, PhysRaw, decode_building, decode_noise
-from pinn_building.sde import FilterResult
-from pinn_building.synthetic import Timeseries
-from pinn_building.train import TrainConfig, filter_from_params, map_objective_sum
+from pi_nsde_building_thermal.model import ModelParams, PhysRaw, decode_building, decode_noise
+from pi_nsde_building_thermal.sde import FilterResult
+from pi_nsde_building_thermal.synthetic import Timeseries
+from pi_nsde_building_thermal.train import TrainConfig, filter_from_params, map_objective_sum
 
 PHYS_REPORT_NAMES_KNOWN = ("C", "R", "A_s", "beta", "sigma_T", "sigma_q", "sigma_y", "kappa")
 PHYS_REPORT_NAMES_UNKNOWN = (

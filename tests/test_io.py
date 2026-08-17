@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import pandas as pd
 
-from pinn_building.io import (
+from pi_nsde_building_thermal.io import (
     estimates_json,
     load_checkpoint,
     load_timeseries_csv,
@@ -12,8 +12,8 @@ from pinn_building.io import (
     timeseries_from_frame,
     timeseries_to_frame,
 )
-from pinn_building.model import init_params
-from pinn_building.synthetic import SyntheticConfig, generate_synthetic_building
+from pi_nsde_building_thermal.model import init_params
+from pi_nsde_building_thermal.synthetic import SyntheticConfig, generate_synthetic_building
 
 
 def test_csv_roundtrip_preserves_required_channels(tmp_path):

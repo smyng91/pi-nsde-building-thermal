@@ -14,15 +14,22 @@ from pathlib import Path
 
 from _paths import out_dir
 
-from pinn_building.io import estimates_json, load_timeseries_csv, save_checkpoint, write_json
-from pinn_building.train import TrainConfig, identify_building
-from pinn_building.uq import quantify_uncertainty
+from pi_nsde_building_thermal.io import estimates_json, load_timeseries_csv, save_checkpoint, write_json
+from pi_nsde_building_thermal.train import TrainConfig, identify_building
+from pi_nsde_building_thermal.uq import quantify_uncertainty
 
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("csv", type=Path, help="Chronological thermostat/weather CSV")
     p.add_argument("--q-rated", choices=("unknown", "known"), default="unknown")
+    p.add_argument(
+        "--hvac-mode",
+        choices=("auto", "heating", "cooling"),
+        default="auto",
+        help="auto: signed runtime as-is (cooling columns already negative). "
+        "cooling: negate unsigned generic on/off. heating: unsigned runtime is heat.",
+    )
     p.add_argument("--holdout-days", type=float, default=None)
     p.add_argument("--steps-a", type=int, default=1800)
     p.add_argument("--steps-b-freeze", type=int, default=300)
@@ -34,13 +41,14 @@ def main(argv: list[str] | None = None) -> None:
     dest = args.output_dir or out_dir()
     dest.mkdir(parents=True, exist_ok=True)
 
-    arrays = load_timeseries_csv(args.csv)
+    arrays = load_timeseries_csv(args.csv, hvac_mode=args.hvac_mode)
     cfg = TrainConfig(
         stage_a_steps=args.steps_a,
         stage_b_freeze_cr_steps=args.steps_b_freeze,
         stage_b_joint_steps=args.steps_b_joint,
         seed=args.seed,
         q_rated=args.q_rated,
+        hvac_mode=args.hvac_mode,
     )
     ident = identify_building(arrays, cfg, holdout_days=args.holdout_days, verbose=True)
     uq = quantify_uncertainty(
@@ -77,6 +85,7 @@ def main(argv: list[str] | None = None) -> None:
         ident.fit.params,
         {
             "q_rated": ident.fit.q_rated,
+            "hvac_mode": ident.fit.hvac_mode,
             "n_sub": ident.fit.n_sub,
             "remainder_gate": ident.fit.remainder_gate,
             "lambda_id": ident.fit.lambda_id,
@@ -89,6 +98,7 @@ def main(argv: list[str] | None = None) -> None:
         ident.fit.params,
         {
             "q_rated_mode": ident.fit.q_rated,
+            "hvac_mode": ident.fit.hvac_mode,
             "estimated": est_map,
             "sd": sd_map,
             "ci95": ci_map,

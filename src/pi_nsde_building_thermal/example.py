@@ -1,9 +1,9 @@
-"""Generate synthetic thermostat data, two-stage PI-NSDE ID, holdout open-loop T.
+"""Generate synthetic thermostat data, two-stage pi-nsde-building-thermal ID, holdout open-loop T.
 
 Indoor T is the measurement. Overlaying a Kalman filter on the thermostat series
 is not a success metric. Primary T metric: chronological holdout open-loop
 rollout with frozen MAP C, R, Q_rated (unknown mode) and train-fit remainder / μ_q,
-using holdout weather and HVAC on/off only (estimated Q_rated × u_on).
+using holdout weather and HVAC on/off only (estimated Q_rated × signed u).
 
 Default ``--q-rated unknown``: the identifier sees interval runtime fraction, not
 delivered kW. ``--q-rated known`` is the older optimistic metered-kW protocol.
@@ -18,17 +18,18 @@ from pathlib import Path
 
 import pandas as pd
 
-from pinn_building.plotting import plot_example
-from pinn_building.synthetic import SyntheticConfig, generate_synthetic_building
-from pinn_building.train import TrainConfig, identify_building
-from pinn_building.uq import UQ_METHOD, quantify_uncertainty
+from pi_nsde_building_thermal.plotting import plot_example
+from pi_nsde_building_thermal.synthetic import SyntheticConfig, generate_synthetic_building
+from pi_nsde_building_thermal.train import TrainConfig, identify_building
+from pi_nsde_building_thermal.uq import UQ_METHOD, quantify_uncertainty
 
-# Last full known-delivered-kW run (same 7d / last-2d / two-stage protocol).
-# Optimistic: identifier was given plant q_hvac_kw = 9 kW × on_frac.
+# Last paired known-delivered-kW run (same 7d / last-2d / two-stage protocol
+# as scripts/generate_paper_figures.py). Optimistic: identifier was given
+# plant q_hvac_kw = 9 kW × signed runtime.
 KNOWN_KW_REFERENCE = {
     "note": (
-        "Optimistic known-delivered-kW protocol (same split/stages; identifier "
-        "saw plant q_hvac_kw). Not this run when --q-rated unknown."
+        "Optimistic known-delivered-kW protocol (same twin/split/stages as "
+        "the unknown-Q_rated run; identifier saw plant q_hvac_kw)."
     ),
     "relative_error": {"C": 0.06581969010202508, "R": 0.017583343717786977},
     "holdout_open_loop_rmse_k": 0.20266304910182953,
@@ -60,6 +61,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=("known", "unknown", "both"),
         default="unknown",
         help="known: metered kW (optimistic). unknown: on/off only, learn Q_rated. both: run unknown then known.",
+    )
+    p.add_argument(
+        "--hvac-mode",
+        choices=("heating", "cooling"),
+        default="heating",
+        help="Digital-twin HVAC: heating (winter) or cooling (summer, signed runtime).",
     )
     return p.parse_args(argv)
 
@@ -212,7 +219,9 @@ def main(argv: list[str] | None = None) -> None:
     print("Primary T metric: holdout open-loop (not in-sample Kalman T RMSE).")
     print()
 
-    dataset = generate_synthetic_building(SyntheticConfig(days=args.days, seed=args.seed))
+    dataset = generate_synthetic_building(
+        SyntheticConfig(days=args.days, seed=args.seed, hvac_mode=args.hvac_mode)
+    )
     results = {}
     plot_ident = None
     plot_uq = None
@@ -224,6 +233,7 @@ def main(argv: list[str] | None = None) -> None:
             stage_b_joint_steps=args.steps_b_joint,
             seed=args.seed + 1,
             q_rated=mode,
+            hvac_mode="cooling" if args.hvac_mode == "cooling" else "auto",
         )
         packed = _fit_and_summarize(dataset, train_cfg, args.holdout_days, verbose=True)
         results[mode] = packed["block"]

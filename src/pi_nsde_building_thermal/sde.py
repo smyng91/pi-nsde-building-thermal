@@ -7,12 +7,12 @@ Q_int  latent internal-gain / occupancy process [kW]
 
     dT     = (1/C) [ UA_eff (T_a - T) + A_s I + β Δω + Q_hvac + Q_int + r_θ ] dt
              + σ_T(u) dW_T
-    dQ_int = κ (μ(t) - Q_int) dt + σ_q dW_q
+    dQ_int = κ (μ(t) - Q_int) dt + σ_q dW_Q
 
 Q_hvac is an exogenous input: either metered kW (known-Q_rated protocol) or
-``Q_rated * u_on`` with observed interval runtime ``u_on`` (unknown capacity).
-HVAC on/off is never a latent switching mode. Observations are interval
-averages of T, not Dirac samples at the endpoints.
+``Q_rated * u`` with observed signed interval runtime ``u ∈ [-1, 1]``
+(positive heating, negative cooling). HVAC on/off is never a latent switching
+mode. Observations are interval averages of T, not Dirac samples at the endpoints.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 
-from pinn_building.physics import BuildingParams, dtemp_dt, envelope_ua_kw_per_k
+from pi_nsde_building_thermal.physics import BuildingParams, dtemp_dt, envelope_ua_kw_per_k
 
 
 class SdeNoise(NamedTuple):

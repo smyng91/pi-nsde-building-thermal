@@ -19,16 +19,34 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--steps-a", type=int, default=1800)
     p.add_argument("--steps-b-freeze", type=int, default=300)
     p.add_argument("--steps-b-joint", type=int, default=1400)
+    p.add_argument(
+        "--hvac-mode",
+        choices=("heating", "cooling"),
+        default="heating",
+    )
     args = p.parse_args(argv)
 
     dest = out_dir()
     csv = dest / "synthetic_thermostat.csv"
-    generate_main(["--days", str(args.days), "--seed", str(args.seed), "--output", str(csv)])
+    generate_main(
+        [
+            "--days",
+            str(args.days),
+            "--seed",
+            str(args.seed),
+            "--output",
+            str(csv),
+            "--hvac-mode",
+            args.hvac_mode,
+        ]
+    )
     train_main(
         [
             str(csv),
             "--q-rated",
             "unknown",
+            "--hvac-mode",
+            "auto",
             "--steps-a",
             str(args.steps_a),
             "--steps-b-freeze",

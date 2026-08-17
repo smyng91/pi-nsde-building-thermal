@@ -1,6 +1,6 @@
 """Synthetic SDE plant and thermostat export."""
 
-from pinn_building.synthetic import SyntheticConfig, generate_synthetic_building
+from pi_nsde_building_thermal.synthetic import SyntheticConfig, generate_synthetic_building
 
 
 def test_synthetic_shapes_and_hvac_are_observed():

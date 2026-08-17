@@ -2,14 +2,14 @@
 
 import jax.numpy as jnp
 
-from pinn_building.synthetic import SyntheticConfig, generate_synthetic_building
-from pinn_building.train import TrainConfig
-from pinn_building.uq import quantify_uncertainty
+from pi_nsde_building_thermal.synthetic import SyntheticConfig, generate_synthetic_building
+from pi_nsde_building_thermal.train import TrainConfig
+from pi_nsde_building_thermal.uq import quantify_uncertainty
 
 
 def test_uq_positive_variances_and_shapes():
-    from pinn_building.model import init_params
-    from pinn_building.train import filter_from_params
+    from pi_nsde_building_thermal.model import init_params
+    from pi_nsde_building_thermal.train import filter_from_params
 
     data = generate_synthetic_building(SyntheticConfig(days=1, seed=0))
     import jax
@@ -29,8 +29,8 @@ def test_uq_positive_variances_and_shapes():
 
 
 def test_known_mode_laplace_omits_q_rated():
-    from pinn_building.model import init_params
-    from pinn_building.train import filter_from_params
+    from pi_nsde_building_thermal.model import init_params
+    from pi_nsde_building_thermal.train import filter_from_params
     import jax
 
     data = generate_synthetic_building(SyntheticConfig(days=1, seed=0))

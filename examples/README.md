@@ -1,8 +1,8 @@
 # Examples
 
-Training and inference on a thermostat/weather CSV. Indoor temperature is
+These scripts train and run inference on a thermostat/weather CSV. Indoor temperature is
 the measurement, not the success metric: the score that matters is
-**holdout open-loop** $T$ with frozen $C$, $R$, and (default)
+**holdout open-loop** $T$ with frozen $C$, $R$, and (by default)
 learned $`Q_{\mathrm{rated}}`$.
 
 ```bash
@@ -11,7 +11,7 @@ learned $`Q_{\mathrm{rated}}`$.
 .\.venv\Scripts\python.exe examples/infer_csv.py output/synthetic_thermostat.csv output/checkpoint.pkl --mode holdout
 ```
 
-Or one shot:
+Or, in one shot:
 
 ```bash
 .\.venv\Scripts\python.exe examples/run_demo.py
@@ -27,17 +27,18 @@ points. Time must already be chronological (no shuffled rows).
 | `infer_csv.py` | Open-loop / holdout / filter diagnostic |
 | `run_demo.py` | Generate → train (unknown $`Q_{\mathrm{rated}}`$) → holdout infer |
 
-Default `--q-rated unknown`: the identifier sees **on/off / runtime
-fraction only** and learns rated capacity. `--q-rated known` is the
-optimistic protocol that consumes a `hvac_kw` column.
+Default `--q-rated unknown`: the identifier sees **signed runtime**
+and learns rated capacity. Heating is positive, cooling is negative.
+`--hvac-mode cooling` negates unsigned generic on/off. `--q-rated known` is the
+optimistic protocol that consumes a `hvac_kw` column (negative while cooling).
 
 Outputs: `output/checkpoint.pkl`, `output/estimates.json`.
 
-Required CSV columns (aliases accepted; see `pinn_building.io`):
+Required CSV columns (aliases accepted; see `pi_nsde_building_thermal.io`):
 
 - indoor temperature (`t_in_c`, `indoor_temp`, …)
 - outdoor temperature (`t_out_c`, `outdoor_temp`, …)
-- HVAC on/off (`hvac_on_frac`, `hvac_on`, or `hvac_runtime_s`)
+- HVAC runtime (`hvac_on_frac`, `heating_on`, `cooling_on`, or `hvac_runtime_s`)
 - `timestamp` or `t_hours`
 
 Optional: GHI, outdoor/indoor RH, wind, setpoint, `hvac_kw`.

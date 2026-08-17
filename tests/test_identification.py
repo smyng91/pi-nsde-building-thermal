@@ -3,14 +3,14 @@
 import jax
 import jax.numpy as jnp
 
-from pinn_building.model import (
+from pi_nsde_building_thermal.model import (
     decode_building,
     exogenous_features,
     init_params,
     remainder_and_sigma_scale,
 )
-from pinn_building.synthetic import SyntheticConfig, chronological_split, generate_synthetic_building
-from pinn_building.train import (
+from pi_nsde_building_thermal.synthetic import SyntheticConfig, chronological_split, generate_synthetic_building
+from pi_nsde_building_thermal.train import (
     TrainConfig,
     filter_from_params,
     map_objective_sum,
@@ -18,7 +18,7 @@ from pinn_building.train import (
     total_loss,
     train_sde,
 )
-from pinn_building.uq import quantify_uncertainty
+from pi_nsde_building_thermal.uq import quantify_uncertainty
 
 
 def test_hidden_q_int_not_in_features_or_filter():

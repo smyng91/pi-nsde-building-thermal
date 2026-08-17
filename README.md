@@ -1,26 +1,28 @@
-# Physics-informed neural SDE for building C and R
+# pi-nsde-building-thermal
 
-Grey-box **stochastic differential equation** in JAX that estimates a building's effective thermal capacity `C` [kWh/K] and envelope resistance `R` [K/kW] from ambient weather and smart-thermostat timeseries.
+This package fits a gray-box **stochastic differential equation** in JAX to estimate a building's effective thermal capacity `C` [kWh/K] and envelope resistance `R` [K/kW] from outdoor weather and smart-thermostat time series.
 
-A thermostat exposes **on/off / interval runtime**, not delivered HVAC kilowatts. Default identification (`--q-rated unknown`) sees `u_on = hvac_on_frac ∈ [0, 1]` only and learns a positive rated capacity `Q_rated` (softplus, same style as `C`, `R`). Drift HVAC term:
+A thermostat reports **interval runtime**, not delivered HVAC kilowatts. Runtime is **signed**: positive is heating, negative is cooling. By default (`--q-rated unknown`) the identifier sees `u = hvac_on_frac ∈ [-1, 1]` and learns a positive rated capacity `Q_rated` (softplus, the same parameterization as `C` and `R`). The HVAC term in the drift is then
 
 ```
-Q_hvac = Q_rated * u_on
+Q_hvac = Q_rated * u
 ```
 
-`--q-rated known` is the older **optimistic** protocol: the identifier is given plant `q_hvac_kw` (true 9 kW × runtime). Real ecobee-style exports do not provide that.
+Heating-only files with `u ∈ [0, 1]` work as before. Cooling-only files can use a `cooling_on` column (already stored as negative `u`) or `--hvac-mode cooling` on unsigned generic on/off. Reverse-cycle files with both `heating_on` and `cooling_on` become `u = u_heat - u_cool`. Rated cooling and heating still share one `Q_rated` magnitude.
 
-HVAC on/off is **observed**. It is not inferred as a switching process. Capacity is what may be unknown.
+The older `--q-rated known` protocol is **optimistic**: the identifier is given plant `q_hvac_kw` (positive when heating, negative when cooling). Real ecobee-style exports do not provide that. If cooling power is stored as a positive magnitude next to a `cooling_on` column, it is aligned to the sign of runtime.
 
-Indoor temperature is the **measurement**, not the result. Overlaying a Kalman mean on the thermostat series is **not** a success metric: a filter that sees `T` can track `T` even when `C` and `R` are wrong.
+HVAC on/off is **observed**; it is not inferred as a switching process. Rated capacity is what may be unknown. The same SDE is used for heating and cooling; only the sign of `u` changes.
 
-## Identifiability (honest)
+Indoor temperature is the **measurement**, not the result. Overlaying a Kalman mean on the thermostat series is **not** a success metric, because a filter that sees `T` can track `T` even when `C` and `R` are wrong.
 
-On heating intervals, `Q_rated` and `C` both scale `Q/C` in `dT/dt = (Q_rated u_on)/C + …`, so they alias if the heater is rarely off. Occupied/setback **off** intervals give a free-response time constant (`RC` / `UA/C`). On the default 7-day winter twin, unknown-`Q_rated` MAP errors are large (`C` ~47%, `Q_rated` ~45%) while holdout open-loop `T` RMSE stays ~0.11 K — that is why indoor `T` is not the score. Wind-inflated UA and occupancy structure give extra scale, but they do not make `Q_rated` as clean as metered kW. We keep two-stage training, chronological holdout, no hidden `Q_int`, and we do **not** fabricate easier excitation.
+## Identifiability
+
+On heating intervals, `Q_rated` and `C` both scale `Q/C` in `dT/dt = (Q_rated u)/C + …`, so they alias if the equipment is rarely off. The same alias appears on cooling intervals with `u ≤ 0`. Occupied and setback **off** intervals give a free-response time constant (`RC` / `UA/C`). On the default seven-day winter twin, unknown-`Q_rated` MAP errors are large (`C` about 47%, `Q_rated` about 45%) while holdout open-loop `T` RMSE stays around 0.11 K — that is why indoor `T` is not the score. Wind-inflated UA and occupancy structure add extra scale, but they do not make `Q_rated` as clean as metered kW. Training stays two-stage, the holdout is chronological, hidden `Q_int` is unused, and the twin is **not** given easier excitation to make the alias disappear.
 
 ## Evaluation protocol (no leakage)
 
-Default example: one contiguous digital-twin week (same generator, same seed/config). **Last 2 of 7 days** are holdout; the first 5 days are train. Shorter series fall back to the last 30%. The plant still uses 9 kW internally to generate data; that value does **not** enter unknown-mode training, remainder features, Kalman inputs, or holdout open-loop except as `u_on`.
+The default example is one contiguous digital-twin week (same generator, same seed and config). The **last 2 of 7 days** are holdout; the first 5 days are train. Shorter series fall back to the last 30%. The plant still uses 9 kW internally to generate data; that value does **not** enter unknown-mode training, remainder features, Kalman inputs, or holdout open-loop except as signed runtime `u`.
 
 | Rule | What we do |
 | --- | --- |
@@ -34,7 +36,7 @@ Default example: one contiguous digital-twin week (same generator, same seed/con
 
 ## Two-stage identification
 
-The neural remainder can absorb UA and `1/C` if it is free while `C`, `R`, and `Q_rated` are still moving.
+The neural remainder can absorb UA and `1/C` if it is free while `C`, `R`, and `Q_rated` are still moving. Training on the train prefix is therefore staged:
 
 1. **Stage A** — remainder **off** (frozen at 0, last layer zero-init). Fit `{C, R, Q_rated (unknown mode), A_s, β, σ, κ, Fourier μ_q}` on train. `Q_rated` is initialized at 6 kW, not plant truth 9 kW.
 2. **Stage B1** — unfreeze remainder with a **stronger** identifiability penalty and smaller LR; **freeze `C`, `R`, and `Q_rated`**.
@@ -52,22 +54,22 @@ Indoor temperature $T$ and a latent internal-gain / occupancy state $`Q_{\mathrm
 &=
 \frac{1}{C}\bigl[
 UA_{\mathrm{eff}}(T_a-T)+A_s I+\beta(\omega_a-\omega_i)
-+Q_{\mathrm{rated}} u_{\mathrm{on}}+Q_{\mathrm{int}}+r_\theta(\mathbf{u})
++Q_{\mathrm{rated}} u+Q_{\mathrm{int}}+r_\theta(\mathbf{u})
 \bigr]\,\mathrm{d}t
 +\sigma_T(\mathbf{u})\,\mathrm{d}W_T, \\
 \mathrm{d}Q_{\mathrm{int}}
 &=
 \kappa\bigl(\mu(t)-Q_{\mathrm{int}}\bigr)\,\mathrm{d}t
-+\sigma_q\,\mathrm{d}W_q.
++\sigma_q\,\mathrm{d}W_Q.
 \end{aligned}
 ```
 
 | Symbol | Role |
 | --- | --- |
 | `C`, `R` | Learnable physical parameters (`UA_eff = (1/R)(1 + k v_wind)`) |
-| `u_on` | Observed interval HVAC runtime fraction in `[0, 1]` |
-| `Q_rated` | Learnable rated capacity [kW] in unknown mode; skipped when kW is given |
-| `Q_hvac` | `Q_rated u_on` (unknown) or metered kW (known, optimistic) |
+| `u` | Observed signed HVAC runtime in `[-1, 1]` (heat +, cool −) |
+| `Q_rated` | Learnable rated capacity magnitude [kW] in unknown mode; skipped when kW is given |
+| `Q_hvac` | `Q_rated u` (unknown) or metered kW (known, optimistic; negative when cooling) |
 | `Q_int` | Unmeasured occupancy/appliance gain (OU process) |
 | `r_θ(u)` | Small neural remainder of exogenous weather/HVAC-on, **identifiability-constrained** so it cannot absorb UA or `1/C` |
 | `σ_T(u)` | Input-dependent neural diffusion (state-independent, so Kalman stays Gaussian) |
@@ -84,11 +86,11 @@ UA_{\mathrm{eff}}(T_a-T)+A_s I+\beta(\omega_a-\omega_i)
 e_k\sim\mathcal{N}(0,\sigma_y^2).
 ```
 
-not a point sample $`T(t_k)`$. The **training** likelihood is the Gaussian Kalman filter of the Euler–Maruyama discretisation, observing the mean of the substeps in each 5-minute interval. The **holdout `T` metric** does not use that update.
+This is not a point sample $`T(t_k)`$. The **training** likelihood is the Gaussian Kalman filter of the Euler–Maruyama discretization, observing the mean of the substeps in each 5-minute interval. The **holdout `T` metric** does not use that update.
 
 ## Uncertainty quantification
 
-Laplace / observed information on **train only**:
+Laplace / observed information is computed on **train only**:
 
 1. Objective = **sum** of train interval NLLs + scaled priors / identifiability penalty (same critical points as the mean-NLL trainer; Hessian is not `mean NLL / N`).
 2. Joint unconstrained Hessian over `{C, R, Q_rated (unknown mode), A_s, β, σ_T, σ_q, σ_y, κ}` **and** Fourier `μ_q` coefficients. Neural remainder/diffusion **weights stay at MAP** (not included).
@@ -101,39 +103,39 @@ Intervals **condition on neural weights at MAP** (and include occupancy priors),
 ### Already standard
 
 - Continuous-time stochastic RC models with Wiener process noise, Kalman/EKF maximum likelihood, and CTSM-R: [Madsen & Holst 1995](https://www.sciencedirect.com/science/article/abs/pii/037877889400909M), [Bacher & Madsen 2011](https://www.sciencedirect.com/science/article/abs/pii/S0378778811000470), [Kristensen, Madsen & Jørgensen 2004](https://www.sciencedirect.com/science/article/abs/pii/S0005109803003123), [CTSM-R building example](https://ctsm.info/building2.pdf). Measurement equations are almost always `Y_k = T_i(t_k) + e_k` (point samples). HVAC/heat input `Φ_h` is an exogenous input when **metered**.
-- Smart-thermostat grey-box / data-driven models using **runtime as a known feature** (not a latent mode): e.g. [Huchuk, Sanner & O’Brien](https://ssanner.github.io/papers/jbps21_resthermal.pdf); ecobee 5-minute telemetry ([runtime report](https://www.ecobee.com/home/developer/api/documentation/v1/operations/get-runtime-report.shtml) — note the API documents interval *start* values, not always means; exports still bundle runtime over the interval). Runtime is not delivered kW unless capacity is assumed or learned.
+- Smart-thermostat gray-box / data-driven models using **runtime as a known feature** (not a latent mode): e.g. [Huchuk, Sanner & O’Brien](https://ssanner.github.io/papers/jbps21_resthermal.pdf); ecobee 5-minute telemetry ([runtime report](https://www.ecobee.com/home/developer/api/documentation/v1/operations/get-runtime-report.shtml) — note the API documents interval *start* values, not always means; exports still bundle runtime over the interval). Runtime is not delivered kW unless capacity is assumed or learned.
 - Inverse PINNs for building RC parameters, including thermostat data: [Gokhale et al. 2022](https://www.sciencedirect.com/science/article/pii/S0306261922003946), [Kim et al. 2025](https://publications.ibpsa.org/proceedings/bs/2025/papers/bs2025_1471.pdf). Deterministic energy-balance residuals, not SDEs.
-- Hybrid grey-box + neural remainder in JAX: [IBPSA BS2023 1641](https://publications.ibpsa.org/proceedings/bs/2023/papers/bs2023_1641.pdf). Parameter UQ in classical CTSM is MLE ± sd from the information matrix; fully Bayesian RC (Stan/PyMC) exists but is heavier. Neural-SDE Bayesian UQ is not settled.
+- Hybrid gray-box + neural remainder in JAX: [IBPSA BS2023 1641](https://publications.ibpsa.org/proceedings/bs/2023/papers/bs2023_1641.pdf). Parameter UQ in classical CTSM is MLE ± sd from the information matrix; fully Bayesian RC (Stan/PyMC) exists but is heavier. Neural-SDE Bayesian UQ is not settled.
 
-### What we implement (honest contribution, not a claim of a new theorem)
+### What this package implements
 
 The **combination** that we could not find as a published, reusable stack:
 
-1. Physics RC **SDE drift** with HVAC as **observed on/off** times `Q_rated u_on` (capacity optional / learned),
+1. Physics RC **SDE drift** with HVAC as **observed signed runtime** `Q_rated u` (capacity optional / learned),
 2. **Latent OU occupancy** rather than white noise only on `T`,
 3. **Interval-average** observation operator (integrated sampling of `T` over the thermostat interval),
 4. Two-stage, identifiability-constrained neural remainder + input-dependent `σ_T(u)`,
 5. JAX autodiff through the Kalman path likelihood, plus **train-only Laplace UQ** on `{C,R,Q_rated,…}` using the **sum** NLL Hessian,
 6. Chronological holdout **open-loop `T`** as the dynamics check (not in-sample filter tracking).
 
-That is a **methods demo**, not a claim that interval averaging or OU gains have never been mentioned separately. Closest pieces: CTSM point-sample SDEs; PINN-RC without process noise; hybrid NN correctors without a Gaussian SDE likelihood.
+That is a **methods demo**, not a claim that interval averaging or OU gains have never been mentioned separately. The closest published pieces are CTSM point-sample SDEs, PINN-RC without process noise, and hybrid NN correctors without a Gaussian SDE likelihood.
 
-We deliberately **do not** treat HVAC hysteresis as latent (closed-loop identifiability of switching SDEs is a different, already-discussed problem). On/off is observed; capacity may not be.
+HVAC hysteresis is **not** treated as latent (closed-loop identifiability of switching SDEs is a different, already-discussed problem). On/off is observed; capacity may not be.
 
 ## Documentation
 
 Mathematical models and the identification framework:
 
 - Repository: [`docs/`](docs/README.md)
-- Wiki: [github.com/smyng91/pi-nde-building-thermal/wiki](https://github.com/smyng91/pi-nde-building-thermal/wiki)
+- Wiki: [github.com/smyng91/pi-nsde-building-thermal/wiki](https://github.com/smyng91/pi-nsde-building-thermal/wiki)
 
 ## Install and run
 
 Python 3.10+, CPU JAX. Clone and install:
 
 ```bash
-git clone git@github.com:smyng91/pi-nde-building-thermal.git
-cd pi-nde-building-thermal
+git clone git@github.com:smyng91/pi-nsde-building-thermal.git
+cd pi-nsde-building-thermal
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 .\.venv\Scripts\python.exe -m pytest -q
@@ -142,7 +144,7 @@ python -m venv .venv
 Package demo (digital twin, unknown $`Q_{\mathrm{rated}}`$):
 
 ```bash
-.\.venv\Scripts\python.exe -m pinn_building.example --q-rated unknown
+.\.venv\Scripts\python.exe -m pi_nsde_building_thermal.example --q-rated unknown
 ```
 
 Custom CSV (see [examples/README.md](examples/README.md)):
@@ -158,9 +160,9 @@ Custom CSV (see [examples/README.md](examples/README.md)):
 Outputs in `outputs/`: `synthetic_timeseries.csv` (includes a `split` column; `q_int_kw_hidden` is eval-only; `hvac_kw` is plant truth / eval), `parameter_estimates.json` (MAP, train Laplace sd/CI, holdout open-loop RMSE/MAE, `known_kw_reference` when running unknown), `identification.png`, `training_history.csv` (stage column).
 
 ```python
-from pinn_building.synthetic import generate_synthetic_building
-from pinn_building.train import TrainConfig, identify_building
-from pinn_building.uq import quantify_uncertainty
+from pi_nsde_building_thermal.synthetic import generate_synthetic_building
+from pi_nsde_building_thermal.train import TrainConfig, identify_building
+from pi_nsde_building_thermal.uq import quantify_uncertainty
 
 data = generate_synthetic_building()
 ident = identify_building(data.arrays, TrainConfig(q_rated="unknown"), holdout_days=2.0)

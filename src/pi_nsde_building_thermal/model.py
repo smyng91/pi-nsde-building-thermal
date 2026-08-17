@@ -1,4 +1,4 @@
-"""Learnable PI-NSDE: physical {C, R, Q_rated, …} + constrained neural remainder/diffusion.
+"""Learnable physical {C, R, Q_rated, …} plus a constrained neural remainder/diffusion.
 
 Features are contemporaneous (available at interval k): weather, HVAC on/off
 (or metered kW in the optimistic known-Q_rated protocol), and clock-time
@@ -15,12 +15,14 @@ import jax
 import jax.numpy as jnp
 from jax import random
 
-from pinn_building.physics import BuildingParams
-from pinn_building.sde import SdeNoise
-from pinn_building.synthetic import Timeseries
+from pi_nsde_building_thermal.physics import BuildingParams
+from pi_nsde_building_thermal.sde import SdeNoise
+from pi_nsde_building_thermal.synthetic import Timeseries
 
 QRatedMode = Literal["known", "unknown"]
 Q_RATED_MODES = ("known", "unknown")
+HvacMode = Literal["auto", "heating", "cooling"]
+HVAC_MODES = ("auto", "heating", "cooling")
 
 # Remainder features: exogenous + clock only. No T_in, no Q_int.
 # HVAC slot is swapped in exogenous_features: on_frac (unknown) vs kW (known).
@@ -42,6 +44,54 @@ def normalize_q_rated_mode(mode: str) -> QRatedMode:
     if m not in Q_RATED_MODES:
         raise ValueError(f"q_rated must be 'known' or 'unknown', got {mode!r}")
     return m  # type: ignore[return-value]
+
+
+def normalize_hvac_mode(mode: str) -> HvacMode:
+    m = str(mode).lower().strip()
+    if m in {"heat", "heating"}:
+        return "heating"
+    if m in {"cool", "cooling"}:
+        return "cooling"
+    if m in {"auto", "signed", "reverse", "heatpump", "heat-pump"}:
+        return "auto"
+    raise ValueError(f"hvac_mode must be 'auto', 'heating', or 'cooling', got {mode!r}")
+
+
+def signed_runtime(u, hvac_mode: str = "auto"):
+    """Map observed runtime to signed heat-into-node fraction in [-1, 1].
+
+    Positive is heating; negative is cooling. ``Q_rated`` stays positive.
+    Unsigned [0, 1] heating data is unchanged. Unsigned cooling runtime is
+    negated when ``hvac_mode='cooling'``. Values already below 0 are treated
+    as signed (mixed / reverse-cycle) and are left alone.
+    """
+    mode = normalize_hvac_mode(hvac_mode)
+    u = jnp.clip(jnp.asarray(u), -1.0, 1.0)
+    already_signed = jnp.min(u) < -1e-8
+    unsigned = jnp.clip(u, 0.0, 1.0)
+    if mode == "cooling":
+        return jnp.where(already_signed, u, -unsigned)
+    return u
+
+
+def align_kw_to_runtime(q_hvac_kw, u_signed):
+    """If delivered kW is stored as a magnitude, give it the sign of runtime."""
+    q = jnp.asarray(q_hvac_kw)
+    u = jnp.asarray(u_signed)
+    unsigned_kw = jnp.min(q) >= -1e-8
+    has_cooling = jnp.min(u) < -1e-8
+    aligned = jnp.sign(u) * jnp.abs(q)
+    return jnp.where(unsigned_kw & has_cooling, aligned, q)
+
+
+def canonicalize_hvac(data: Timeseries, hvac_mode: str = "auto") -> Timeseries:
+    """Return a copy whose HVAC channels are signed heat-into-the-node.
+
+    Idempotent: cooling runtime that is already negative is not flipped twice.
+    """
+    u = signed_runtime(data.hvac_on_frac, hvac_mode)
+    q = align_kw_to_runtime(data.q_hvac_kw, u)
+    return data._replace(hvac_on_frac=u, q_hvac_kw=q)
 
 
 def inv_softplus(y: float) -> float:
@@ -88,17 +138,20 @@ def _zero_last_layer(net: list) -> list:
 
 
 def hvac_feature(data: Timeseries, q_rated_mode: str = "unknown") -> jnp.ndarray:
-    """Observed HVAC channel: runtime fraction, or metered kW in known mode."""
+    """Observed HVAC channel: signed runtime fraction, or metered kW in known mode."""
     if q_rated_mode == "unknown":
         return data.hvac_on_frac
     return data.q_hvac_kw
 
 
 def observed_hvac_kw(params: "ModelParams", data: Timeseries, q_rated_mode: str = "unknown") -> jnp.ndarray:
-    """HVAC heat [kW] passed to the SDE.
+    """HVAC heat into the indoor node [kW] passed to the SDE.
 
-    Unknown mode: ``Q_rated * u_on`` with learnable ``Q_rated``. Never reads
-    ``data.q_hvac_kw``. Known mode: metered/plant ``q_hvac_kw``.
+    Unknown mode: ``Q_rated * u`` with learnable positive ``Q_rated`` and signed
+    runtime ``u ∈ [-1, 1]`` (positive heating, negative cooling). Never reads
+    ``data.q_hvac_kw``. Known mode: metered/plant ``q_hvac_kw`` (negative when
+    cooling). Call ``canonicalize_hvac`` first so unsigned cooling runtime is
+    negated.
     """
     if q_rated_mode == "unknown":
         return decode_building(params.phys).Q_rated * data.hvac_on_frac
@@ -207,9 +260,9 @@ def identifiability_penalty(
 ) -> jnp.ndarray:
     """Stop the neural remainder from absorbing UA, solar aperture, or 1/C.
 
-    HVAC on/off is observed; a remainder correlated with runtime (or metered kW
-    in known mode) would bias C and Q_rated. Indoor T enters only this train-set
-    regularizer, not the remainder features.
+    HVAC runtime is observed (signed: heating positive, cooling negative); a remainder
+    correlated with that channel (or metered kW in known mode) would bias C and
+    Q_rated. Indoor T enters only this train-set regularizer, not the remainder features.
     """
     r = remainder_kw
     dt = data.t_out_c - data.t_in_c

@@ -12,8 +12,8 @@ import argparse
 
 from _paths import out_dir
 
-from pinn_building.io import timeseries_to_frame
-from pinn_building.synthetic import SyntheticConfig, generate_synthetic_building
+from pi_nsde_building_thermal.io import timeseries_to_frame
+from pi_nsde_building_thermal.synthetic import SyntheticConfig, generate_synthetic_building
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -21,9 +21,17 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--days", type=int, default=7)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output", default=None, help="CSV path (default output/synthetic_thermostat.csv)")
+    p.add_argument(
+        "--hvac-mode",
+        choices=("heating", "cooling"),
+        default="heating",
+        help="heating: winter twin. cooling: summer twin with signed (negative) runtime.",
+    )
     args = p.parse_args(argv)
 
-    dataset = generate_synthetic_building(SyntheticConfig(days=args.days, seed=args.seed))
+    dataset = generate_synthetic_building(
+        SyntheticConfig(days=args.days, seed=args.seed, hvac_mode=args.hvac_mode)
+    )
     dest = out_dir() / "synthetic_thermostat.csv" if args.output is None else args.output
     from pathlib import Path
 
@@ -34,7 +42,8 @@ def main(argv: list[str] | None = None) -> None:
         frame.insert(0, "timestamp", dataset.frame["timestamp"].to_numpy())
     frame.to_csv(dest, index=False)
     print(f"Wrote {len(frame)} rows to {dest}")
-    print("Required for unknown-Q_rated training: t_in_c, t_out_c, hvac_on_frac (or hvac_runtime_s).")
+    print("Required for unknown-Q_rated training: t_in_c, t_out_c, and HVAC runtime "
+          "(hvac_on_frac, heating_on / cooling_on, or runtime seconds).")
     print("Do not pass q_int_kw_hidden into the identifier; it is not in this export.")
 
 

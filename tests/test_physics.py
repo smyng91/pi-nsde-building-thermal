@@ -2,7 +2,7 @@
 
 import jax.numpy as jnp
 
-from pinn_building.physics import BuildingParams, dtemp_dt, humidity_ratio, saturation_vapor_pressure_pa
+from pi_nsde_building_thermal.physics import BuildingParams, dtemp_dt, humidity_ratio, saturation_vapor_pressure_pa
 
 
 def test_humidity_ratio_typical_range():

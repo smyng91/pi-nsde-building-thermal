@@ -1,23 +1,24 @@
 """Synthetic weather + SDE building plant + thermostat interval reports.
 
-HVAC on/off is simulated with a hysteretic thermostat and exported as
-interval runtime fraction (and, for eval / the optimistic known-kW protocol,
-delivered mean power). The identifier never treats HVAC as a latent switching
-process: on/off is observed; rated capacity may be known or learned.
+HVAC on/off is simulated with a hysteretic heating or cooling thermostat and
+exported as signed interval runtime (positive heat, negative cool). The
+identifier never treats HVAC as a latent switching process: runtime is
+observed; rated capacity may be known or learned.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import NamedTuple
+from dataclasses import dataclass, replace
+from typing import Literal, NamedTuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 from jax import random
 
-from pinn_building.physics import BuildingParams, humidity_ratio, saturation_vapor_pressure_pa
-from pinn_building.sde import SdeNoise, simulate_em_step
+from pi_nsde_building_thermal.physics import BuildingParams, humidity_ratio, saturation_vapor_pressure_pa
+from pi_nsde_building_thermal.sde import SdeNoise, simulate_em_step
 
 TRUE_PARAMS = BuildingParams(C=9.5, R=3.6, A_s=8.5, beta=120.0, Q_rated=9.0)
 TRUE_NOISE = SdeNoise(sigma_T=0.055, sigma_q=0.14, sigma_y=0.07, kappa=1.25)
@@ -37,10 +38,10 @@ class ChronologicalSplit(NamedTuple):
 class Timeseries(NamedTuple):
     """Thermostat-interval arrays.
 
-    ``hvac_on_frac`` is observed runtime in [0, 1]. ``q_hvac_kw`` is plant
-    delivered power (eval-only in unknown-Q_rated mode; the optimistic
-    known-kW protocol may use it). ``q_int_kw`` is hidden and must not be a
-    feature, Kalman input, or loss target.
+    ``hvac_on_frac`` is signed observed runtime in [-1, 1] (positive heating,
+    negative cooling). ``q_hvac_kw`` is plant heat into the node (negative when
+    cooling; eval-only in unknown-Q_rated mode). ``q_int_kw`` is hidden and
+    must not be a feature, Kalman input, or loss target.
     """
 
     t_hours: jnp.ndarray
@@ -68,6 +69,7 @@ class SyntheticConfig:
     start_doy: int = 15
     t_in_init_c: float = 20.0
     heating_capacity_kw: float = 9.0
+    hvac_mode: Literal["heating", "cooling"] = "heating"
     deadband_k: float = 0.45
     indoor_rh: float = 0.40
     t_in_noise_k: float = 0.07
@@ -105,7 +107,7 @@ def _ghi_clearsky(hour: jnp.ndarray, doy: jnp.ndarray, lat_deg: float) -> jnp.nd
     return 910.0 * jnp.maximum(sin_el, 0.0)
 
 
-def _setpoint_c(t_hours: jnp.ndarray) -> jnp.ndarray:
+def _setpoint_c(t_hours: jnp.ndarray, hvac_mode: str = "heating") -> jnp.ndarray:
     hour = t_hours % 24.0
     dow = jnp.floor(t_hours / 24.0) % 7.0
     weekend = dow >= 5.0
@@ -114,6 +116,8 @@ def _setpoint_c(t_hours: jnp.ndarray) -> jnp.ndarray:
         (hour >= 8.0) & (hour < 23.0),
         (hour >= 7.0) & (hour < 22.0),
     )
+    if hvac_mode == "cooling":
+        return jnp.where(occupied, 24.0, 26.5)
     return jnp.where(occupied, 20.5, 17.5)
 
 
@@ -141,7 +145,10 @@ def _weather(key, t_hours: jnp.ndarray, cfg: SyntheticConfig) -> dict[str, jnp.n
         0.3,
     )
     t_diurnal = -6.2 * jnp.cos(2.0 * jnp.pi * (hour - 6.0) / 24.0)
-    t_out = -2.0 + t_diurnal + t_syn
+    if cfg.hvac_mode == "cooling":
+        t_out = 28.0 + 0.72 * t_diurnal + t_syn
+    else:
+        t_out = -2.0 + t_diurnal + t_syn
     ghi = _ghi_clearsky(hour, doy, cfg.latitude_deg) * (1.0 - 0.78 * cloud)
     dewpoint = -5.5 + 0.35 * t_syn + 0.8 * _ar1(k4, n, tau_steps=48.0 / dt_h, std=1.0)
     rh_out = jnp.clip(
@@ -158,7 +165,7 @@ def _simulate_sde(key, weather: dict[str, jnp.ndarray], t_hours: jnp.ndarray, cf
     k_t, k_q = random.split(key)
     dW_t = random.normal(k_t, (n,))
     dW_q = random.normal(k_q, (n,))
-    setpoints = _setpoint_c(t_hours)
+    setpoints = _setpoint_c(t_hours, cfg.hvac_mode)
     mu_q = occupancy_schedule_kw(t_hours)
     t_out = weather["t_out_c"]
     ghi = weather["ghi_w_m2"]
@@ -167,16 +174,26 @@ def _simulate_sde(key, weather: dict[str, jnp.ndarray], t_hours: jnp.ndarray, cf
     capacity = cfg.heating_capacity_kw
     deadband = cfg.deadband_k
     rh_in = cfg.indoor_rh
+    cooling = cfg.hvac_mode == "cooling"
+    t_init = 25.5 if cooling and abs(cfg.t_in_init_c - 20.0) < 1e-9 else cfg.t_in_init_c
 
     def step(carry, inputs):
-        t_in, q_int, heating_on = carry
+        t_in, q_int, equip_on = carry
         t_a, ghi_k, w_out, wind_k, t_set, mu, dw_t, dw_q = inputs
-        heating_on = jnp.where(
-            t_in >= t_set + deadband,
-            False,
-            jnp.where(t_in <= t_set - deadband, True, heating_on),
-        )
-        q_hvac = jnp.where(heating_on, capacity, 0.0)
+        if cooling:
+            equip_on = jnp.where(
+                t_in <= t_set - deadband,
+                False,
+                jnp.where(t_in >= t_set + deadband, True, equip_on),
+            )
+            q_hvac = jnp.where(equip_on, -capacity, 0.0)
+        else:
+            equip_on = jnp.where(
+                t_in >= t_set + deadband,
+                False,
+                jnp.where(t_in <= t_set - deadband, True, equip_on),
+            )
+            q_hvac = jnp.where(equip_on, capacity, 0.0)
         w_in = humidity_ratio(t_in, rh_in)
         t_next, q_next = simulate_em_step(
             t_in,
@@ -194,11 +211,11 @@ def _simulate_sde(key, weather: dict[str, jnp.ndarray], t_hours: jnp.ndarray, cf
             dw_t,
             dw_q,
         )
-        return (t_next, q_next, heating_on), (t_in, q_hvac, heating_on, w_in, q_int)
+        return (t_next, q_next, equip_on), (t_in, q_hvac, equip_on, w_in, q_int)
 
     inputs = (t_out, ghi, omega_out, wind, setpoints, mu_q, dW_t, dW_q)
     _, (t_in, q_hvac, on, omega_in, q_int) = jax.lax.scan(
-        step, (cfg.t_in_init_c, cfg.q_int_init_kw, True), inputs
+        step, (t_init, cfg.q_int_init_kw, True), inputs
     )
     return t_in, q_hvac, on, omega_in, q_int
 
@@ -211,6 +228,8 @@ def _block_mean(x: jnp.ndarray, n_avg: int) -> jnp.ndarray:
 def generate_synthetic_building(config: SyntheticConfig | None = None) -> SyntheticDataset:
     """SDE plant + 5-minute thermostat averages, with HVAC runtime observed."""
     cfg = config or SyntheticConfig()
+    if cfg.hvac_mode == "cooling" and cfg.start_doy == 15:
+        cfg = replace(cfg, start_doy=196)
     sim_dt_h = cfg.sim_dt_min / 60.0
     n_sim = int(round(cfg.days * 24.0 / sim_dt_h))
     t_sim = jnp.arange(n_sim) * sim_dt_h
@@ -223,7 +242,9 @@ def generate_synthetic_building(config: SyntheticConfig | None = None) -> Synthe
 
     n_avg = int(round(cfg.report_dt_min / cfg.sim_dt_min))
     t_hours = _block_mean(t_sim, n_avg)
-    hvac_on_frac = _block_mean(on.astype(jnp.float32), n_avg)
+    runtime_frac = _block_mean(on.astype(jnp.float32), n_avg)
+    sign = -1.0 if cfg.hvac_mode == "cooling" else 1.0
+    hvac_on_frac = sign * runtime_frac
     arrays = Timeseries(
         t_hours=t_hours,
         t_out_c=_block_mean(weather["t_out_c"], n_avg),
@@ -237,7 +258,7 @@ def generate_synthetic_building(config: SyntheticConfig | None = None) -> Synthe
         q_hvac_kw=_block_mean(q_hvac, n_avg),
         hvac_on_frac=hvac_on_frac,
         q_int_kw=_block_mean(q_int, n_avg),
-        setpoint_c=_block_mean(_setpoint_c(t_sim), n_avg),
+        setpoint_c=_block_mean(_setpoint_c(t_sim, cfg.hvac_mode), n_avg),
     )
     noise = random.normal(key_n, (t_hours.shape[0], 2))
     arrays = arrays._replace(
@@ -246,10 +267,12 @@ def generate_synthetic_building(config: SyntheticConfig | None = None) -> Synthe
     )
 
     interval_s = cfg.report_dt_min * 60.0
-    t_np = __import__("numpy").asarray(t_hours)
+    t_np = np.asarray(t_hours)
+    u = np.asarray(arrays.hvac_on_frac)
+    stamp0 = "2024-07-15" if cfg.hvac_mode == "cooling" else "2024-01-15"
     frame = pd.DataFrame(
         {
-            "timestamp": pd.Timestamp("2024-01-15") + pd.to_timedelta(t_np, unit="h"),
+            "timestamp": pd.Timestamp(stamp0) + pd.to_timedelta(t_np, unit="h"),
             "t_hours": t_hours,
             "t_out_c": arrays.t_out_c,
             "ghi_w_m2": arrays.ghi_w_m2,
@@ -260,7 +283,9 @@ def generate_synthetic_building(config: SyntheticConfig | None = None) -> Synthe
             "heat_setpoint_c": arrays.setpoint_c,
             "hvac_kw": arrays.q_hvac_kw,
             "hvac_on_frac": arrays.hvac_on_frac,
-            "hvac_runtime_s": arrays.hvac_on_frac * interval_s,
+            "heating_on_frac": np.clip(u, 0.0, 1.0),
+            "cooling_on_frac": np.clip(-u, 0.0, 1.0),
+            "hvac_runtime_s": np.abs(u) * interval_s,
             # Evaluation-only; the identifier must not read this column.
             "q_int_kw_hidden": arrays.q_int_kw,
         }

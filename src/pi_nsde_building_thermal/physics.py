@@ -2,11 +2,14 @@
 
 The estimator identifies an effective indoor node:
 
-    C dT_i/dt = (T_a - T_i) / R_eff + A_s I + β (ω_a - ω_i) + Q_hvac + Q_int
+    C dT/dt = UA_eff (T_a - T) + A_s I + β (ω_a - ω_i) + Q_hvac + Q_int
+    UA_eff  = (1/R) (1 + k_wind v_wind)
 
-where R_eff = R / (1 + k_wind v_wind). C is effective thermal capacity,
-R is envelope resistance (inverse of UA), A_s is solar aperture, and β
-converts a humidity-ratio difference into a latent/infiltration heat flux.
+equivalent to using R_eff = R / (1 + k_wind v_wind) in (T_a - T) / R_eff.
+C is effective thermal capacity, R is envelope resistance (inverse of UA),
+A_s is solar aperture, and β converts a humidity-ratio difference into a
+latent/infiltration heat flux. Q_hvac is heat into the node: positive for
+heating, negative for cooling.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 
-from pinn_building.constants import (
+from pi_nsde_building_thermal.constants import (
     ATMOS_PRESSURE_PA,
     MAGNUS_A,
     MAGNUS_B,
@@ -39,8 +42,9 @@ class BuildingParams(NamedTuple):
     Q_rated: float = 6.0
     """Rated HVAC capacity [kW]. Prior/init scale is not plant truth.
 
-    Unknown-Q_rated identification uses ``Q_hvac = Q_rated * u_on``. The
-    synthetic plant still generates data with ``SyntheticConfig.heating_capacity_kw``.
+    Unknown-Q_rated identification uses ``Q_hvac = Q_rated * u`` with signed
+    runtime ``u ∈ [-1, 1]``. The synthetic plant still generates data with
+    ``SyntheticConfig.heating_capacity_kw`` as the magnitude.
     """
 
 

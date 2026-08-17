@@ -1,8 +1,9 @@
 """CSV timeseries I/O and fitted-parameter checkpoints.
 
-Custom files need indoor temperature, outdoor temperature, and HVAC on/off
-(runtime fraction). Delivered HVAC kilowatts are optional and unused in the
-default unknown-Q_rated protocol. Hidden occupancy must not be a required column.
+Custom files need indoor temperature, outdoor temperature, and HVAC runtime
+(heating, cooling, or signed). Delivered HVAC kilowatts are optional and unused
+in the default unknown-Q_rated protocol. Hidden occupancy must not be a required
+column.
 """
 
 from __future__ import annotations
@@ -17,9 +18,9 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from pinn_building.model import ModelParams, decode_building, decode_noise
-from pinn_building.physics import humidity_ratio
-from pinn_building.synthetic import Timeseries
+from pi_nsde_building_thermal.model import ModelParams, canonicalize_hvac, decode_building, decode_noise
+from pi_nsde_building_thermal.physics import humidity_ratio
+from pi_nsde_building_thermal.synthetic import Timeseries
 
 _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "timestamp": ("timestamp", "time", "datetime", "date"),
@@ -44,17 +45,39 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "rh_out": ("rh_out_frac", "rh_out", "outdoor_humidity", "rh_outdoor"),
     "rh_in": ("rh_in_frac", "rh_in", "indoor_humidity", "rh_indoor"),
     "wind_m_s": ("wind_m_s", "wind", "wind_speed"),
+    "heating_on_frac": (
+        "heating_on_frac",
+        "heating_on",
+        "aux_heat_frac",
+        "heat_on_frac",
+        "heat_on",
+    ),
+    "cooling_on_frac": (
+        "cooling_on_frac",
+        "cooling_on",
+        "cool_on_frac",
+        "cool_on",
+        "comp_cool_frac",
+        "compressor_cool",
+    ),
     "hvac_on_frac": (
         "hvac_on_frac",
         "runtime_frac",
         "hvac_on",
-        "heating_on",
-        "aux_heat_frac",
         "equipment_running",
     ),
-    "hvac_runtime_s": ("hvac_runtime_s", "runtime_s", "heat_runtime_s"),
+    "hvac_runtime_s": ("hvac_runtime_s", "runtime_s"),
+    "heat_runtime_s": ("heat_runtime_s", "heating_runtime_s"),
+    "cool_runtime_s": ("cool_runtime_s", "cooling_runtime_s"),
     "q_hvac_kw": ("q_hvac_kw", "hvac_kw", "hvac_power_kw"),
-    "setpoint_c": ("heat_setpoint_c", "setpoint_c", "setpoint", "heat_set_temp"),
+    "setpoint_c": (
+        "heat_setpoint_c",
+        "cool_setpoint_c",
+        "setpoint_c",
+        "setpoint",
+        "heat_set_temp",
+        "cool_set_temp",
+    ),
     "q_int_kw": ("q_int_kw_hidden", "q_int_kw"),
 }
 
@@ -85,17 +108,89 @@ def _series(frame: pd.DataFrame, logical: str, default: float | None = None) -> 
 
 
 def _as_fraction(values: np.ndarray) -> np.ndarray:
+    """Clip a humidity or similar fraction to [0, 1]. Percents are divided by 100."""
     out = values.astype(np.float32)
     if np.nanmax(out) > 1.5:
         out = out / 100.0
     return np.clip(out, 0.0, 1.0)
 
 
-def timeseries_from_frame(frame: pd.DataFrame) -> Timeseries:
+def _as_runtime_frac(values: np.ndarray, *, signed: bool = False) -> np.ndarray:
+    """Runtime fraction. Signed channels live in [-1, 1]; unsigned in [0, 1]."""
+    out = np.asarray(values, dtype=np.float64)
+    out = np.where(np.isnan(out), 0.0, out)
+    peak = np.nanmax(np.abs(out)) if out.size else 0.0
+    if peak > 1.5:
+        out = out / 100.0
+    if signed or (out.size and float(np.min(out)) < -1e-8):
+        return np.clip(out, -1.0, 1.0).astype(np.float32)
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+
+def _series_to_on_frac(raw_on: pd.Series, *, signed: bool = False) -> np.ndarray:
+    if raw_on.dtype == bool:
+        return raw_on.astype(np.float32).to_numpy()
+    if not pd.api.types.is_numeric_dtype(raw_on):
+        lowered = raw_on.dropna().astype(str).str.lower()
+        if lowered.isin({"true", "false", "yes", "no"}).all():
+            mapped = raw_on.map(lambda x: 1.0 if str(x).lower() in {"true", "yes", "1"} else 0.0)
+            return mapped.to_numpy(dtype=np.float32)
+    return _as_runtime_frac(pd.to_numeric(raw_on, errors="coerce").to_numpy(dtype=np.float64), signed=signed)
+
+
+def _runtime_s_to_frac(runtime: np.ndarray, interval_s: float) -> np.ndarray:
+    runtime = np.where(np.isnan(runtime), 0.0, runtime)
+    return np.clip(runtime / max(interval_s, 1e-6), 0.0, 1.0).astype(np.float32)
+
+
+def _optional_on_frac(
+    table: pd.DataFrame,
+    frac_key: str,
+    runtime_key: str | None,
+    interval_s: float,
+    *,
+    signed: bool = False,
+) -> np.ndarray | None:
+    col = _find_column(table.columns, _COLUMN_ALIASES[frac_key])
+    if col is not None:
+        return _series_to_on_frac(table[col], signed=signed)
+    if runtime_key is not None:
+        run_col = _find_column(table.columns, _COLUMN_ALIASES[runtime_key])
+        if run_col is not None:
+            runtime = pd.to_numeric(table[run_col], errors="coerce").to_numpy(dtype=np.float64)
+            return _runtime_s_to_frac(runtime, interval_s)
+    return None
+
+
+def _signed_hvac_on_frac(table: pd.DataFrame, interval_s: float) -> np.ndarray:
+    """Heating minus cooling, or a generic/signed ``hvac_on_frac``.
+
+    Cooling-only columns become negative runtime. Mixed heat+cool columns
+    become reverse-cycle signed runtime in [-1, 1].
+    """
+    heat = _optional_on_frac(table, "heating_on_frac", "heat_runtime_s", interval_s)
+    cool = _optional_on_frac(table, "cooling_on_frac", "cool_runtime_s", interval_s)
+    generic = _optional_on_frac(table, "hvac_on_frac", "hvac_runtime_s", interval_s, signed=True)
+    if heat is not None and cool is not None:
+        return np.clip(heat - cool, -1.0, 1.0).astype(np.float32)
+    if cool is not None:
+        return np.clip(-cool, -1.0, 1.0).astype(np.float32)
+    if heat is not None:
+        return heat
+    if generic is not None:
+        return generic
+    raise ValueError(
+        "CSV needs HVAC runtime: hvac_on_frac, heating_on / cooling_on, "
+        "or hvac_runtime_s / heat_runtime_s / cool_runtime_s."
+    )
+
+
+def timeseries_from_frame(frame: pd.DataFrame, hvac_mode: str = "auto") -> Timeseries:
     """Build a ``Timeseries`` from a thermostat/weather table.
 
-    Required: indoor T, outdoor T, and HVAC on/off (fraction, boolean, or
-    runtime seconds). Optional: GHI, humidity, wind, setpoint, delivered kW.
+    Required: indoor T, outdoor T, and HVAC runtime (heating, cooling, signed
+    fraction, or runtime seconds). Optional: GHI, humidity, wind, setpoint,
+    delivered kW. ``hvac_mode='cooling'`` negates unsigned generic runtime.
     """
     if frame.empty:
         raise ValueError("Empty timeseries table.")
@@ -119,24 +214,7 @@ def timeseries_from_frame(frame: pd.DataFrame) -> Timeseries:
     dt_h = float(np.median(np.diff(t_hours))) if len(t_hours) > 1 else 5.0 / 60.0
     interval_s = dt_h * 3600.0
 
-    on_col = _find_column(table.columns, _COLUMN_ALIASES["hvac_on_frac"])
-    run_col = _find_column(table.columns, _COLUMN_ALIASES["hvac_runtime_s"])
-    if on_col is not None:
-        raw_on = table[on_col]
-        if raw_on.dtype == bool or raw_on.dropna().isin((True, False, "True", "False", "true", "false")).all():
-            on_frac = raw_on.map(lambda x: 1.0 if str(x).lower() in {"true", "1"} or x is True else 0.0)
-            on_frac = on_frac.to_numpy(dtype=np.float32)
-        else:
-            on_frac = _as_fraction(pd.to_numeric(raw_on, errors="coerce").to_numpy(dtype=np.float64))
-            on_frac = np.where(np.isnan(on_frac), 0.0, on_frac).astype(np.float32)
-    elif run_col is not None:
-        runtime = pd.to_numeric(table[run_col], errors="coerce").to_numpy(dtype=np.float64)
-        runtime = np.where(np.isnan(runtime), 0.0, runtime)
-        on_frac = np.clip(runtime / max(interval_s, 1e-6), 0.0, 1.0).astype(np.float32)
-    else:
-        raise ValueError(
-            "CSV needs HVAC on/off: hvac_on_frac, runtime_frac, hvac_on, or hvac_runtime_s."
-        )
+    on_frac = _signed_hvac_on_frac(table, interval_s)
 
     t_in = _series(table, "t_in_c")
     t_out = _series(table, "t_out_c")
@@ -145,7 +223,7 @@ def timeseries_from_frame(frame: pd.DataFrame) -> Timeseries:
     omega_out = np.asarray(humidity_ratio(t_out, rh_out), dtype=np.float32)
     omega_in = np.asarray(humidity_ratio(t_in, rh_in), dtype=np.float32)
 
-    return Timeseries(
+    data = Timeseries(
         t_hours=jnp.asarray(t_hours, dtype=jnp.float32),
         t_out_c=jnp.asarray(t_out),
         ghi_w_m2=jnp.asarray(_series(table, "ghi_w_m2", default=0.0)),
@@ -160,16 +238,18 @@ def timeseries_from_frame(frame: pd.DataFrame) -> Timeseries:
         q_int_kw=jnp.asarray(_series(table, "q_int_kw", default=0.0)),
         setpoint_c=jnp.asarray(_series(table, "setpoint_c", default=np.nan)),
     )
+    return canonicalize_hvac(data, hvac_mode)
 
 
-def load_timeseries_csv(path: str | Path) -> Timeseries:
+def load_timeseries_csv(path: str | Path, hvac_mode: str = "auto") -> Timeseries:
     """Load a thermostat/weather CSV. Time must already be chronological."""
     frame = pd.read_csv(path)
-    return timeseries_from_frame(frame)
+    return timeseries_from_frame(frame, hvac_mode=hvac_mode)
 
 
 def timeseries_to_frame(data: Timeseries) -> pd.DataFrame:
     dt_h = float(data.t_hours[1] - data.t_hours[0]) if data.t_hours.shape[0] > 1 else 5.0 / 60.0
+    u = np.asarray(data.hvac_on_frac)
     return pd.DataFrame(
         {
             "t_hours": np.asarray(data.t_hours),
@@ -181,8 +261,10 @@ def timeseries_to_frame(data: Timeseries) -> pd.DataFrame:
             "rh_in_frac": np.asarray(data.rh_in),
             "heat_setpoint_c": np.asarray(data.setpoint_c),
             "hvac_kw": np.asarray(data.q_hvac_kw),
-            "hvac_on_frac": np.asarray(data.hvac_on_frac),
-            "hvac_runtime_s": np.asarray(data.hvac_on_frac) * dt_h * 3600.0,
+            "hvac_on_frac": u,
+            "heating_on_frac": np.clip(u, 0.0, 1.0),
+            "cooling_on_frac": np.clip(-u, 0.0, 1.0),
+            "hvac_runtime_s": np.abs(u) * dt_h * 3600.0,
         }
     )
 

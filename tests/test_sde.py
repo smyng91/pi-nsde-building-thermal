@@ -2,11 +2,11 @@
 
 import jax.numpy as jnp
 
-from pinn_building.model import init_params
-from pinn_building.physics import BuildingParams
-from pinn_building.sde import SdeNoise, interval_average_kalman, occupancy_mean_kw
-from pinn_building.synthetic import SyntheticConfig, generate_synthetic_building
-from pinn_building.train import TrainConfig, train_sde
+from pi_nsde_building_thermal.model import init_params
+from pi_nsde_building_thermal.physics import BuildingParams
+from pi_nsde_building_thermal.sde import SdeNoise, interval_average_kalman, occupancy_mean_kw
+from pi_nsde_building_thermal.synthetic import SyntheticConfig, generate_synthetic_building
+from pi_nsde_building_thermal.train import TrainConfig, train_sde
 
 
 def _kalman_at(building, noise, data, remainder=None, scale=None):

@@ -1,6 +1,6 @@
 # Framework
 
-How the equations in [mathematical models](mathematical-models.md) are fitted in JAX: no leakage, two-stage MAP, holdout open-loop $T$, train-only Laplace UQ, CSV I/O.
+This page describes how the equations in [mathematical models](mathematical-models.md) are fitted in JAX: no leakage, two-stage MAP, holdout open-loop $T$, train-only Laplace UQ, and CSV I/O.
 
 ## Architecture
 
@@ -20,12 +20,12 @@ flowchart TD
   kalman -.->|"not a T metric"| discard[Do not headline filter overlay]
 ```
 
-Indoor $T$ is already measured. A Kalman mean that tracks the thermostat series is **not** reported as accuracy.
+Indoor $T$ is already measured, so a Kalman mean that tracks the thermostat series is **not** reported as accuracy.
 
 ## Package layout
 
 ```
-src/pinn_building/
+src/pi_nsde_building_thermal/
   physics.py     energy balance, humidity, UA_eff
   sde.py         EM maps, interval-average Kalman, open-loop
   model.py       PhysRaw, remainder nets, penalties
@@ -45,11 +45,11 @@ Entry points:
 | `identify_building(arrays, TrainConfig, holdout_days=2)` | Split + fit + holdout open-loop |
 | `quantify_uncertainty(...)` | Laplace on **train** only |
 | `load_timeseries_csv` / `save_checkpoint` | Custom files |
-| `python -m pinn_building.example --q-rated unknown` | Full demo |
+| `python -m pi_nsde_building_thermal.example --q-rated unknown` | Full demo |
 
 ## No-leakage protocol
 
-One contiguous series, cut **chronologically**: prefix = train, suffix = holdout. Default: last **2 of 7** days ($1440$ train intervals, $576$ holdout at $`5\,\mathrm{min}`$). Shorter series fall back to the last $`30\%`$.
+One contiguous series is cut **chronologically**: prefix = train, suffix = holdout. Default: last **2 of 7** days ($1440$ train intervals, $576$ holdout at $`5\,\mathrm{min}`$). Shorter series fall back to the last $`30\%`$.
 
 | Rule | Implementation |
 | --- | --- |
@@ -60,13 +60,13 @@ One contiguous series, cut **chronologically**: prefix = train, suffix = holdout
 | True parameters | Evaluation only on the digital twin |
 | Unknown capacity | `q_hvac_kw` is not read in the filter, remainder, or holdout HVAC channel |
 
-Tests scramble `q_hvac_kw` with `on_frac` fixed: unknown-mode NLL is unchanged. Scrambling `hvac_on_frac` changes NLL.
+Tests scramble `q_hvac_kw` with `on_frac` fixed: unknown-mode NLL is unchanged. Scrambling `hvac_on_frac` changes NLL, which is the expected contrast.
 
 ## Two-stage MAP
 
-A remainder that is free while $C$ and $R$ move can absorb envelope and capacity. Training on the train prefix:
+A remainder that is free while $C$ and $R$ move can absorb envelope and capacity. Training on the train prefix is therefore staged:
 
-1. **Stage A** ($1800$ steps, remainder gate $0$): fit $`\{C,R,Q_{\mathrm{rated}}\text{ (if unknown)},A_s,\beta,\sigma,\kappa,\mu\}`$.
+1. **Stage A** ($1800$ steps, remainder gate $0$): fit $`\{C,R,Q_{\mathrm{rated}}\text{ (if unknown)},A_s,\beta,\sigma_T,\sigma_q,\sigma_y,\kappa,\mu\}`$.
 2. **Stage B1** ($300$ steps, smaller LR, stronger identifiability penalty): remainder on; **freeze** $C$, $R$, and $`Q_{\mathrm{rated}}`$.
 3. **Stage B2** ($1400$ steps): joint fine-tune with the same penalty. In **known**-kW mode, $`Q_{\mathrm{rated}}`$ stays frozen (unused).
 
@@ -91,10 +91,10 @@ Laplace uses the **sum** $`N\cdot J_{\mathrm{mean}}`$ (same critical point; Hess
 
 Start from the last **train** filter state $`(T,Q_{\mathrm{int}})`$. Roll out interval-average $T$ on the holdout suffix with holdout weather and:
 
-- unknown mode: $`\hat Q_{\mathrm{rated}}\times u_{\mathrm{on}}^{\mathrm{holdout}}`$
+- unknown mode: $`\hat Q_{\mathrm{rated}}\,u^{\mathrm{holdout}}`$
 - known mode: holdout `q_hvac_kw`
 
-Holdout $T$ is compared **after** the rollout. It is not used in a Kalman update. Report RMSE / MAE in kelvin. Secondary: train mean Kalman NLL (likelihood quality, not $T$ accuracy).
+Holdout $T$ is compared **after** the rollout. It is not used in a Kalman update. Report RMSE / MAE in kelvin. A secondary number is train mean Kalman NLL (likelihood quality, not $T$ accuracy).
 
 ## Uncertainty quantification
 
@@ -108,14 +108,14 @@ Intervals **condition on neural weights at MAP**, so they can be overconfident a
 
 ## CSV I/O
 
-Required (aliases accepted in `pinn_building.io`):
+Required (aliases accepted in `pi_nsde_building_thermal.io`):
 
 - indoor temperature (`t_in_c`, `indoor_temp`, …)
 - outdoor temperature (`t_out_c`, `outdoor_temp`, …)
-- HVAC on/off (`hvac_on_frac`, `hvac_on`, or `hvac_runtime_s`)
+- HVAC on/off (`hvac_on_frac`, `heating_on`, `cooling_on`, or `hvac_runtime_s`)
 - `timestamp` or `t_hours`
 
-Optional: GHI, RH, wind, setpoint, `hvac_kw` (known-kW protocol only). Rows must already be chronological.
+Optional: GHI, RH, wind, setpoint, `hvac_kw` (known-kW protocol only; negative while cooling). Rows must already be chronological. Unsigned cooling runtime in a generic `hvac_on_frac` column needs `--hvac-mode cooling`.
 
 ```bash
 python examples/generate_synthetic.py
@@ -127,6 +127,6 @@ Checkpoints are pickles of fitted `ModelParams` plus `TrainConfig` metadata (`sa
 
 ## JAX stack
 
-Automatic differentiation through the Kalman path likelihood (`jax.grad` / `optax`). The SDE is **not** a liquid neural net and **not** a deterministic PINN residual collocation. Closest classical stack: grey-box RC-SDE + Kalman MLE (CTSM-style), with an interval-average observation, optional unknown capacity, and a gated neural remainder.
+Parameters are fitted by automatic differentiation through the Kalman path likelihood (`jax.grad` / `optax`). The SDE is **not** a liquid neural net and **not** a deterministic PINN residual collocation. The closest classical stack is a gray-box RC-SDE with Kalman MLE (CTSM-style), plus an interval-average observation, optional unknown capacity, and a gated neural remainder.
 
 Python 3.10+; see `pyproject.toml` for `jax`, `optax`, `numpy`, `pandas`, `matplotlib`.

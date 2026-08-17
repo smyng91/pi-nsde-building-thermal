@@ -5,7 +5,8 @@ Stage B: unfreeze remainder (identifiability penalty), smaller LR; optionally
 freeze C, R, and Q_rated first, then jointly fine-tune.
 
 Indoor T Kalman tracking is not a success metric. Holdout scoring is open-loop.
-HVAC on/off is observed; rated capacity is learned only in unknown-Q_rated mode.
+HVAC runtime is observed and signed (heating positive, cooling negative); rated
+capacity is learned only in unknown-Q_rated mode.
 """
 
 from __future__ import annotations
@@ -16,27 +17,29 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from pinn_building.model import (
+from pi_nsde_building_thermal.model import (
     ModelParams,
+    canonicalize_hvac,
     decode_building,
     decode_noise,
     identifiability_penalty,
     init_params,
+    normalize_hvac_mode,
     normalize_q_rated_mode,
     occupancy_regularizer,
     observed_hvac_kw,
     remainder_and_sigma_scale,
     weak_prior,
 )
-from pinn_building.physics import BuildingParams
-from pinn_building.sde import (
+from pi_nsde_building_thermal.physics import BuildingParams
+from pi_nsde_building_thermal.sde import (
     FilterResult,
     OpenLoopResult,
     interval_average_kalman,
     interval_average_open_loop,
     occupancy_mean_kw,
 )
-from pinn_building.synthetic import ChronologicalSplit, Timeseries, chronological_split
+from pi_nsde_building_thermal.synthetic import ChronologicalSplit, Timeseries, chronological_split
 
 _HISTORY_KEYS = (
     "step",
@@ -72,12 +75,14 @@ class TrainConfig:
     lambda_prior: float = 0.002
     lambda_occ: float = 0.05
     q_rated: str = "unknown"
+    hvac_mode: str = "auto"
     prior: BuildingParams = field(
         default_factory=lambda: BuildingParams(C=6.0, R=6.0, A_s=4.0, beta=80.0, Q_rated=6.0)
     )
 
     def __post_init__(self):
         self.q_rated = normalize_q_rated_mode(self.q_rated)
+        self.hvac_mode = normalize_hvac_mode(self.hvac_mode)
 
     def resolved_stage_steps(self) -> tuple[int, int, int]:
         if self.steps is not None:
@@ -97,6 +102,7 @@ class TrainResult:
     lambda_id: float
     n_train: int
     q_rated: str = "unknown"
+    hvac_mode: str = "auto"
 
 
 @dataclass
@@ -161,7 +167,7 @@ def open_loop_from_params(
     remainder_gate: float = 1.0,
     q_rated_mode: str = "unknown",
 ) -> OpenLoopResult:
-    """Mean rollout using weather + HVAC on/off (× estimated Q_rated if unknown).
+    """Mean rollout using weather + signed HVAC runtime (× estimated Q_rated if unknown).
 
     Does not read T_in, Q_int, or (in unknown mode) delivered q_hvac_kw.
     """
@@ -364,18 +370,20 @@ def _merge_histories(parts: list[dict[str, list]]) -> dict[str, list]:
 def train_sde(data: Timeseries, config: TrainConfig | None = None, verbose: bool = True) -> TrainResult:
     """Fit on the provided series only. Pass the **train** slice; do not pass holdout."""
     cfg = config or TrainConfig()
+    data = canonicalize_hvac(data, cfg.hvac_mode)
     n_a, n_b1, n_b2 = cfg.resolved_stage_steps()
     params = init_params(jax.random.PRNGKey(cfg.seed), data, prior=cfg.prior, q_rated_mode=cfg.q_rated)
 
     if verbose:
         hvac_obs = (
-            "HVAC = Q_rated * on_frac (capacity unknown)"
+            "HVAC = Q_rated * signed runtime (capacity unknown)"
             if cfg.q_rated == "unknown"
             else "HVAC = metered q_hvac_kw (capacity known)"
         )
         print(
             f"Two-stage ID on n={int(data.t_in_c.shape[0])} train steps | "
-            f"A={n_a} (remainder=0), B_freeze_CR={n_b1}, B_joint={n_b2} | {hvac_obs}"
+            f"A={n_a} (remainder=0), B_freeze_CR={n_b1}, B_joint={n_b2} | "
+            f"{hvac_obs} | hvac_mode={cfg.hvac_mode}"
         )
 
     freeze_q_known = cfg.q_rated == "known"
@@ -445,6 +453,7 @@ def train_sde(data: Timeseries, config: TrainConfig | None = None, verbose: bool
         lambda_id=lambda_id,
         n_train=int(data.t_in_c.shape[0]),
         q_rated=cfg.q_rated,
+        hvac_mode=cfg.hvac_mode,
     )
 
 
@@ -464,6 +473,7 @@ def identify_building(
 ) -> IdentificationResult:
     """Chronological split + two-stage train-only fit + holdout open-loop T metric."""
     cfg = config or TrainConfig()
+    arrays = canonicalize_hvac(arrays, cfg.hvac_mode)
     train, holdout, split = chronological_split(
         arrays, holdout_days=holdout_days, holdout_frac=holdout_frac
     )
@@ -489,7 +499,7 @@ def identify_building(
     nll_mean = nll_sum / max(split.n_train, 1)
     if verbose:
         if fit.q_rated == "unknown":
-            hvac_txt = "weather + estimated Q_rated × holdout on/off"
+            hvac_txt = "weather + estimated Q_rated × signed holdout runtime"
         else:
             hvac_txt = "weather + known HVAC kW"
         print(

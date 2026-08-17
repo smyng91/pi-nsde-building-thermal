@@ -1,4 +1,4 @@
-"""Figures for the PI-NSDE identification protocol (not Kalman T-tracking)."""
+"""Figures for the pi-nsde-building-thermal identification protocol (not Kalman T-tracking)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from pinn_building.physics import BuildingParams
-from pinn_building.synthetic import Timeseries
-from pinn_building.train import IdentificationResult
-from pinn_building.uq import UncertaintyReport
+from pi_nsde_building_thermal.physics import BuildingParams
+from pi_nsde_building_thermal.synthetic import Timeseries
+from pi_nsde_building_thermal.train import IdentificationResult
+from pi_nsde_building_thermal.uq import UncertaintyReport
 
 
 def plot_example(
@@ -80,9 +80,10 @@ def plot_example(
             label="True delivered kW (eval only; unused in fit)",
         )
         ax2 = ax.twinx()
-        ax2.plot(t, on_frac, color="#ff7f0e", lw=0.7, alpha=0.7, label="on_frac (observed)")
-        ax2.set_ylabel("HVAC on fraction")
-        ax2.set_ylim(-0.05, 1.15)
+        ax2.plot(t, on_frac, color="#ff7f0e", lw=0.7, alpha=0.7, label="signed runtime (observed)")
+        ax2.set_ylabel("HVAC signed runtime")
+        ymin = -1.15 if float(np.min(on_frac)) < -1e-3 else -0.05
+        ax2.set_ylim(ymin, 1.15)
         ax.set_title("Observed runtime; capacity identified (true kW unused)")
     else:
         ax.plot(t, np.asarray(data.q_hvac_kw), color="#c44e52", lw=0.9, label="Q_hvac (known kW)")
@@ -140,7 +141,7 @@ def plot_example(
     ax.legend(fontsize=8)
 
     mode = "unknown Q_rated (on/off only)" if unknown else "known HVAC kW"
-    fig.suptitle(f"PI-NSDE identification — chronological holdout, two-stage, {mode}", fontsize=11)
+    fig.suptitle(f"pi-nsde-building-thermal identification — chronological holdout, two-stage, {mode}", fontsize=11)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=140)

@@ -14,9 +14,10 @@ from pathlib import Path
 
 from _paths import out_dir
 
-from pinn_building.io import estimates_json, load_checkpoint, load_timeseries_csv, timeseries_to_frame, write_json
-from pinn_building.synthetic import chronological_split
-from pinn_building.train import filter_from_params, open_loop_from_params, temperature_rmse_mae
+from pi_nsde_building_thermal.io import estimates_json, load_checkpoint, load_timeseries_csv, timeseries_to_frame, write_json
+from pi_nsde_building_thermal.model import canonicalize_hvac
+from pi_nsde_building_thermal.synthetic import chronological_split
+from pi_nsde_building_thermal.train import filter_from_params, open_loop_from_params, temperature_rmse_mae
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -26,11 +27,19 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--mode", choices=("open-loop", "holdout", "filter"), default="open-loop")
     p.add_argument("--holdout-days", type=float, default=None)
     p.add_argument("--output", type=Path, default=None)
+    p.add_argument(
+        "--hvac-mode",
+        choices=("auto", "heating", "cooling"),
+        default=None,
+        help="Override checkpoint hvac_mode. Default: use the value stored in the checkpoint.",
+    )
     args = p.parse_args(argv)
 
     dest_dir = out_dir()
-    arrays = load_timeseries_csv(args.csv)
     params, meta = load_checkpoint(args.checkpoint)
+    hvac_mode = args.hvac_mode or meta.get("hvac_mode", "auto")
+    arrays = load_timeseries_csv(args.csv, hvac_mode=hvac_mode)
+    arrays = canonicalize_hvac(arrays, hvac_mode)
     q_rated = meta.get("q_rated", "unknown")
     n_sub = int(meta.get("n_sub", 5))
     gate = float(meta.get("remainder_gate", 1.0))
