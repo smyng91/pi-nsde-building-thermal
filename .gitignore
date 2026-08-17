@@ -1,0 +1,30 @@
+# Environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+src/*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Local run outputs
+output/
+outputs/
+*.npz
+
+# Manuscript and paper build (not part of the public code repo)
+/paper/
+/paper.tex
+/paper.pdf
+/scripts/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

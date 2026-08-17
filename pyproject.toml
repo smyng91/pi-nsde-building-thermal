@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinn-building"
+version = "0.1.0"
+description = "Physics-informed neural SDE in JAX that estimates building thermal capacity and envelope resistance from thermostat and weather timeseries, with Laplace UQ."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "jax>=0.4.31",
+    "jaxlib>=0.4.31",
+    "optax>=0.2.2",
+    "numpy>=1.24",
+    "matplotlib>=3.8",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+pinn-building-example = "pinn_building.example:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
