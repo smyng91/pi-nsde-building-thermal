@@ -105,6 +105,13 @@ That is a **methods demo**, not a claim that interval averaging or OU gains have
 
 We deliberately **do not** treat HVAC hysteresis as latent (closed-loop identifiability of switching SDEs is a different, already-discussed problem). On/off is observed; capacity may not be.
 
+## Documentation
+
+Mathematical models and the identification framework:
+
+- Repository: [`docs/`](docs/README.md)
+- Wiki: [github.com/smyng91/pi-nde-building-thermal/wiki](https://github.com/smyng91/pi-nde-building-thermal/wiki)
+
 ## Install and run
 
 Python 3.10+, CPU JAX. Clone and install:
