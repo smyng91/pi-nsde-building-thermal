@@ -1,4 +1,4 @@
-# pi-nsde-building-thermal
+# Physics-informed Neural Stochastic Differential Equation for Building Thermal Evaluation
 
 This package fits a gray-box **stochastic differential equation** in JAX to estimate a building's effective thermal capacity `C` [kWh/K] and envelope resistance `R` [K/kW] from outdoor weather and smart-thermostat time series.
 
