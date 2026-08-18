@@ -19,3 +19,7 @@ WATER_AIR_MASS_RATIO = 0.62198
 # Known wind-driven infiltration multiplier on UA: UA_eff = UA * (1 + k * v)
 # k is not learned; it lets wind enter the energy balance without aliasing R.
 WIND_INFILTRATION_PER_MPS = 0.04
+
+# Filter Q_int(t0). Match the plant occupancy initial condition so the
+# identifier does not start with a 0.1 kW occupancy offset the plant never had.
+FILTER_Q0_KW = 0.6

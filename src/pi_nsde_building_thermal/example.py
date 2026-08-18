@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 
 import pandas as pd
@@ -22,19 +21,6 @@ from pi_nsde_building_thermal.plotting import plot_example
 from pi_nsde_building_thermal.synthetic import SyntheticConfig, generate_synthetic_building
 from pi_nsde_building_thermal.train import TrainConfig, identify_building
 from pi_nsde_building_thermal.uq import UQ_METHOD, quantify_uncertainty
-
-# Last paired known-delivered-kW run (same 7d / last-2d / two-stage protocol
-# as scripts/generate_paper_figures.py). Optimistic: identifier was given
-# plant q_hvac_kw = 9 kW × signed runtime.
-KNOWN_KW_REFERENCE = {
-    "note": (
-        "Optimistic known-delivered-kW protocol (same twin/split/stages as "
-        "the unknown-Q_rated run; identifier saw plant q_hvac_kw)."
-    ),
-    "relative_error": {"C": 0.06581969010202508, "R": 0.017583343717786977},
-    "holdout_open_loop_rmse_k": 0.20266304910182953,
-    "holdout_open_loop_mae_k": 0.17341279983520508,
-}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -105,13 +91,17 @@ def _fit_and_summarize(dataset, train_cfg: TrainConfig, holdout_days: float, ver
     true_map = _true_map(dataset)
     names = list(uq.laplace.names)
     unknown = train_cfg.q_rated == "unknown"
+    hess_pd = bool(uq.laplace.positive_definite)
     if verbose:
         print("\nIdentified parameters - train Laplace MAP +/- sd (joint Hessian of sum NLL + penalties)")
         print("Fourier mu_q is joint in the Hessian; neural remainder weights are MAP only.")
+        print("beta is frozen at the identifier prior (plant truth by default) and omitted from the Hessian unless learn_beta=True.")
         print("C, R" + (", Q_rated" if unknown else "") + " intervals use train likelihood only. Holdout was not used to fit or for UQ.")
         if unknown:
             print("Q_rated init is 6 kW (not plant 9 kW). Identifier never reads delivered q_hvac_kw.")
-        print(f"{'parameter':<12} {'true':>10} {'MAP':>10} {'sd':>10} {'95% CI':>22} {'rel err':>10}")
+        if not hess_pd:
+            print("Hessian is not positive definite; ±1.96 sd intervals are omitted.")
+        print(f"{'parameter':<12} {'true':>10} {'MAP':>10} {'sd':>10} {'±1.96 sd':>22} {'rel err':>10}")
 
     estimates = {}
     sd_map = {}
@@ -121,12 +111,16 @@ def _fit_and_summarize(dataset, train_cfg: TrainConfig, holdout_days: float, ver
         tval = true_map[name]
         est = float(uq.laplace.mean[i])
         sd = float(uq.laplace.sd[i])
-        rel = min(sd / max(abs(est), 1e-6), 3.0)
-        lo = est * math.exp(-1.96 * rel)
-        hi = est * math.exp(1.96 * rel)
+        if hess_pd:
+            lo = est - 1.96 * sd
+            hi = est + 1.96 * sd
+            ci_txt = f"[{lo:8.3f}, {hi:8.3f}]"
+        else:
+            lo = hi = float("nan")
+            ci_txt = f"{'omitted':>22}"
         err = abs(est - tval) / abs(tval)
         if verbose:
-            print(f"{name:<12} {tval:10.3f} {est:10.3f} {sd:10.3f} [{lo:8.3f}, {hi:8.3f}] {err:9.1%}")
+            print(f"{name:<12} {tval:10.3f} {est:10.3f} {sd:10.3f} {ci_txt:>22} {err:9.1%}")
         estimates[name] = est
         sd_map[name] = sd
         ci_map[name] = [lo, hi]
@@ -176,7 +170,7 @@ def _fit_and_summarize(dataset, train_cfg: TrainConfig, holdout_days: float, ver
                 "A": (
                     "remainder frozen at 0; fit C,R"
                     + (",Q_rated" if unknown else "")
-                    + ",A_s,beta,noise,Fourier mu_q on train"
+                    + ",A_s,noise,Fourier mu_q on train (beta frozen)"
                 ),
                 "B1": "remainder on, C, R"
                 + (", Q_rated" if unknown else "")
@@ -194,6 +188,7 @@ def _fit_and_summarize(dataset, train_cfg: TrainConfig, holdout_days: float, ver
         "train_kalman_nll_sum": ident.train_nll_sum,
         "uq_method": UQ_METHOD,
         "uq_n_obs_train": int(uq.laplace.n_obs),
+        "uq_positive_definite": hess_pd,
         "stage_final": stage_final,
     }
     return {"ident": ident, "uq": uq, "block": block}
@@ -254,7 +249,13 @@ def main(argv: list[str] | None = None) -> None:
     summary["q_rated_runs"] = {m: results[m] for m in results}
     if "unknown" in results:
         unk = results["unknown"]["relative_error"]
-        summary["known_kw_reference"] = KNOWN_KW_REFERENCE
+        print("\n--- Unknown-Q_rated MAP vs plant ---")
+        print(
+            f"  unknown:  C {unk.get('C', float('nan')):.1%}  "
+            f"R {unk.get('R', float('nan')):.1%}  "
+            f"Q_rated {unk.get('Q_rated', float('nan')):.1%}  "
+            f"holdout RMSE {results['unknown']['holdout_open_loop']['rmse_k']:.3f} K"
+        )
         if "known" in results:
             summary["known_kw_reference"] = {
                 "note": "This run's --q-rated known comparison (same data/split/steps).",
@@ -265,18 +266,11 @@ def main(argv: list[str] | None = None) -> None:
                 "holdout_open_loop_rmse_k": results["known"]["holdout_open_loop"]["rmse_k"],
                 "holdout_open_loop_mae_k": results["known"]["holdout_open_loop"]["mae_k"],
             }
-        print("\n--- C / R / Q_rated vs known-delivered-kW reference ---")
-        print(
-            f"  unknown:  C {unk.get('C', float('nan')):.1%}  "
-            f"R {unk.get('R', float('nan')):.1%}  "
-            f"Q_rated {unk.get('Q_rated', float('nan')):.1%}  "
-            f"holdout RMSE {results['unknown']['holdout_open_loop']['rmse_k']:.3f} K"
-        )
-        ref = summary["known_kw_reference"]["relative_error"]
-        print(
-            f"  known kW: C {ref['C']:.1%}  R {ref['R']:.1%}  "
-            f"holdout RMSE {summary['known_kw_reference']['holdout_open_loop_rmse_k']:.3f} K"
-        )
+            ref = summary["known_kw_reference"]["relative_error"]
+            print(
+                f"  known kW: C {ref['C']:.1%}  R {ref['R']:.1%}  "
+                f"holdout RMSE {summary['known_kw_reference']['holdout_open_loop_rmse_k']:.3f} K"
+            )
 
     (out / "parameter_estimates.json").write_text(json.dumps(summary, indent=2))
     pd.DataFrame(ident.fit.history).to_csv(out / "training_history.csv", index=False)

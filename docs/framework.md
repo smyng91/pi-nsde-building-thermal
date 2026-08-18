@@ -66,11 +66,13 @@ Tests scramble `q_hvac_kw` with `on_frac` fixed: unknown-mode NLL is unchanged. 
 
 A remainder that is free while $C$ and $R$ move can absorb envelope and capacity. Training on the train prefix is therefore staged:
 
-1. **Stage A** ($1800$ steps, remainder gate $0$): fit $\{C,R,Q_{\mathrm{rated}}\text{ (if unknown)},A_s,\beta,\sigma_T,\sigma_q,\sigma_y,\kappa,\mu\}$.
+1. **Stage A** ($1800$ steps, remainder gate $0$): fit $\{C,R,Q_{\mathrm{rated}}\text{ (if unknown)},A_s,\sigma_T^{\mathrm{base}},\sigma_q,\sigma_y,\kappa,\mu\}$. $\beta$ stays at plant truth (default $120$). Diffusion and remainder nets stay off ($g=0$), so $\sigma_T(\phi)=\sigma_T^{\mathrm{base}}$.
 2. **Stage B1** ($300$ steps, smaller LR, stronger identifiability penalty): remainder on; **freeze** $C$, $R$, and $Q_{\mathrm{rated}}$.
 3. **Stage B2** ($1400$ steps): joint fine-tune with the same penalty. In **known**-kW mode, $Q_{\mathrm{rated}}$ stays frozen (unused).
 
-Optimizer: Adam with global-norm clip $5$. Feature mean/std are computed on the **train** slice only.
+Gray-box ablation (`TrainConfig.neural_remainder=False`) repeats the same three stage lengths with remainder and $\sigma_T$ nets frozen.
+
+Optimizer: Adam with global-norm clip $5$. Feature mean/std are computed on the **train** slice only. Filter $Q_{\mathrm{int}}(t_0)=0.6\,\mathrm{kW}$, matching the plant.
 
 Trainer loss (mean interval NLL, optimizer scale):
 
@@ -83,9 +85,9 @@ J_{\mathrm{mean}}
 + \lambda_{\mathrm{occ}}\,\mathcal{P}_\mu.
 $$
 
-Defaults: $\lambda_{\mathrm{id}}=0.15$ (A), $0.45$ (B); $\lambda_{\mathrm{prior}}=0.002$; $\lambda_{\mathrm{occ}}=0.05$.
+Defaults: $\lambda_{\mathrm{id}}=0.15$ (A), $0.45$ (B); $\lambda_{\mathrm{prior}}=0.002$; $\lambda_{\mathrm{occ}}=0.05$. $\mathcal{P}_{\mathrm{id}}$ uses Pearson $r^2$ against $(T_a-T)$, $I$, and the HVAC channel (linear alignment only).
 
-Laplace uses the **sum** $N\cdot J_{\mathrm{mean}}$ (same critical point; Hessian is observed-information scale, not $\mathrm{mean}/N$).
+Laplace uses the **sum** $N\cdot J_{\mathrm{mean}}$ (same critical point; Hessian is observed-information scale, not $\mathrm{mean}/N$). That scaling tightens the advertised $\sigma=0.7$ log-prior to $\sigma_{\mathrm{eff}}=0.7/\sqrt{N\lambda_{\mathrm{prior}}}$.
 
 ## Holdout metric
 
@@ -94,17 +96,20 @@ Start from the last **train** filter state $(T,Q_{\mathrm{int}})$. Roll out inte
 - unknown mode: $\hat Q_{\mathrm{rated}}\,u^{\mathrm{holdout}}$
 - known mode: holdout `q_hvac_kw`
 
-Holdout $T$ is compared **after** the rollout. It is not used in a Kalman update. Report RMSE / MAE in kelvin. A secondary number is train mean Kalman NLL (likelihood quality, not $T$ accuracy).
+Holdout RMSE / MAE is a **deterministic mean-Euler ODE** rollout (diffusion coefficients set to zero), not a stochastic Euler--Maruyama path.
 
 ## Uncertainty quantification
 
 `quantify_uncertainty` builds a finite-difference Hessian of the **train sum-NLL MAP** in unconstrained (`PhysRaw` + Fourier $\mu_q$) coordinates.
 
-- Joint over $\{C,R,Q_{\mathrm{rated}}\text{ (unknown mode)},A_s,\beta,\sigma_T,\sigma_q,\sigma_y,\kappa\}$ and Fourier coefficients.
+- Joint over $\{C,R,Q_{\mathrm{rated}}\text{ (unknown mode)},A_s,\sigma_T,\sigma_q,\sigma_y,\kappa\}$ and Fourier coefficients. $\beta$ is omitted unless `learn_beta=True`.
 - Neural remainder / diffusion **weights stay at MAP** (not in the Hessian).
-- Delta method back to positive units; 95% intervals. Filter bands on train $T$/$Q_{\mathrm{int}}$ are state uncertainty, not holdout accuracy.
+- Central finite-difference Hessian. A diagonal shift is used only if $\lambda_{\min}<10^{-8}$ (numerical inversion). If $\lambda_{\min}\le 0$, error bars are omitted.
+- Delta method back to positive units; 95% local intervals when the Hessian is positive definite (not calibrated frequentist coverage). Filter bands on train $T$/$Q_{\mathrm{int}}$ are state uncertainty, not holdout accuracy.
 
-Intervals **condition on neural weights at MAP**, so they can be overconfident and can sit around an aliased mode. They are not a substitute for sampling the nets.
+Intervals **condition on neural weights at MAP**, so they can be overconfident and can sit around an aliased mode. They are not a substitute for sampling the nets. The reported twins include a remainder-off / constant-$\sigma_T$ gray-box ablation with the same Adam budget.
+
+Weak log-priors on $(C,R,Q_{\mathrm{rated}})$ are centered at $(6,6,6)$. Along the runtime scaling valley the prior can influence the location of $\alpha$ without pinning $Q/C$.
 
 ## CSV I/O
 

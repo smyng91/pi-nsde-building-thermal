@@ -16,6 +16,20 @@ from pi_nsde_building_thermal.model import init_params
 from pi_nsde_building_thermal.synthetic import SyntheticConfig, generate_synthetic_building
 
 
+def test_csv_load_recomputes_omega_from_observed_t(tmp_path):
+    from pi_nsde_building_thermal.physics import humidity_ratio
+
+    data = generate_synthetic_building(SyntheticConfig(days=1, seed=0))
+    path = tmp_path / "poisoned.csv"
+    frame = timeseries_to_frame(data.arrays)
+    frame["omega_in"] = 0.0
+    frame["omega_out"] = 0.0
+    frame.to_csv(path, index=False)
+    loaded = load_timeseries_csv(path)
+    assert jnp.allclose(loaded.omega_in, humidity_ratio(loaded.t_in_c, loaded.rh_in), atol=1e-5)
+    assert jnp.allclose(loaded.omega_out, humidity_ratio(loaded.t_out_c, loaded.rh_out), atol=1e-5)
+
+
 def test_csv_roundtrip_preserves_required_channels(tmp_path):
     data = generate_synthetic_building(SyntheticConfig(days=1, seed=0))
     path = tmp_path / "week.csv"
@@ -25,6 +39,8 @@ def test_csv_roundtrip_preserves_required_channels(tmp_path):
     assert jnp.allclose(loaded.t_in_c, data.arrays.t_in_c, atol=1e-4)
     assert jnp.allclose(loaded.t_out_c, data.arrays.t_out_c, atol=1e-4)
     assert jnp.allclose(loaded.hvac_on_frac, data.arrays.hvac_on_frac, atol=1e-4)
+    assert jnp.allclose(loaded.omega_in, data.arrays.omega_in, atol=1e-5)
+    assert jnp.allclose(loaded.omega_out, data.arrays.omega_out, atol=1e-5)
 
 
 def test_runtime_seconds_become_on_frac():

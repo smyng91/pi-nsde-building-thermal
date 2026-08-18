@@ -3,12 +3,14 @@
 import jax
 import jax.numpy as jnp
 
+from pi_nsde_building_thermal.constants import FILTER_Q0_KW
 from pi_nsde_building_thermal.model import (
     decode_building,
     exogenous_features,
     init_params,
     remainder_and_sigma_scale,
 )
+from pi_nsde_building_thermal.physics import BuildingParams
 from pi_nsde_building_thermal.synthetic import SyntheticConfig, chronological_split, generate_synthetic_building
 from pi_nsde_building_thermal.train import (
     TrainConfig,
@@ -98,16 +100,68 @@ def test_uq_uses_train_only_and_sum_nll():
     assert abs(float(sum_loss) - float(mean_loss) * n) < 1e-3 * max(n, 1)
 
     ol = open_loop_from_params(
-        params, holdout, 5, t0=20.0, q0=0.7, remainder_gate=0.0, q_rated_mode="unknown"
+        params, holdout, 5, t0=20.0, q0=FILTER_Q0_KW, remainder_gate=0.0, q_rated_mode="unknown"
     )
     scrambled = holdout._replace(t_in_c=holdout.t_in_c + 8.0, q_int_kw=holdout.q_int_kw + 4.0)
     ol2 = open_loop_from_params(
-        params, scrambled, 5, t0=20.0, q0=0.7, remainder_gate=0.0, q_rated_mode="unknown"
+        params, scrambled, 5, t0=20.0, q0=FILTER_Q0_KW, remainder_gate=0.0, q_rated_mode="unknown"
     )
     assert jnp.allclose(ol.y_pred, ol2.y_pred)
 
 
-def test_unknown_q_rated_init_is_not_plant_truth():
+def test_init_starts_at_config_prior_not_plant():
+    data = generate_synthetic_building(SyntheticConfig(days=1, seed=0))
+    prior = BuildingParams(C=4.0, R=9.0, A_s=4.0, beta=80.0, Q_rated=4.0)
+    params = init_params(jax.random.PRNGKey(1), data.arrays, prior=prior)
+    b = decode_building(params.phys)
+    assert abs(float(b.C) - 4.0) < 1e-4
+    assert abs(float(b.R) - 9.0) < 1e-4
+    assert abs(float(b.Q_rated) - 4.0) < 1e-4
+
+
+def test_exported_omega_matches_observed_interval_temperature():
+    from pi_nsde_building_thermal.physics import humidity_ratio
+
+    data = generate_synthetic_building(SyntheticConfig(days=1, seed=0))
+    w_in = humidity_ratio(data.arrays.t_in_c, data.arrays.rh_in)
+    w_out = humidity_ratio(data.arrays.t_out_c, data.arrays.rh_out)
+    assert jnp.allclose(data.arrays.omega_in, w_in, atol=1e-5)
+    assert jnp.allclose(data.arrays.omega_out, w_out, atol=1e-5)
+
+
+def test_beta_stays_at_prior_when_not_learned():
+    data = generate_synthetic_building(SyntheticConfig(days=1, seed=0))
+    train, _, _ = chronological_split(data.arrays, holdout_frac=0.3)
+    result = train_sde(
+        train,
+        TrainConfig(steps=12, log_every=12, seed=1, q_rated="unknown", learn_beta=False),
+        verbose=False,
+    )
+    assert abs(float(result.estimated.beta) - 120.0) < 1e-3
+
+
+
+def test_graybox_keeps_remainder_off_after_stage_b():
+    data = generate_synthetic_building(SyntheticConfig(days=1, seed=0))
+    train, _, _ = chronological_split(data.arrays, holdout_frac=0.3)
+    result = train_sde(
+        train,
+        TrainConfig(
+            stage_a_steps=4,
+            stage_b_freeze_cr_steps=2,
+            stage_b_joint_steps=2,
+            log_every=8,
+            seed=1,
+            q_rated="unknown",
+            neural_remainder=False,
+        ),
+        verbose=False,
+    )
+    assert result.remainder_gate == 0.0
+    r, _ = remainder_and_sigma_scale(
+        result.params, train, remainder_gate=result.remainder_gate, q_rated_mode="unknown"
+    )
+    assert float(jnp.max(jnp.abs(r))) < 1e-8
     data = generate_synthetic_building(SyntheticConfig(days=1, seed=0))
     params = init_params(jax.random.PRNGKey(1), data.arrays, q_rated_mode="unknown")
     q0 = float(decode_building(params.phys).Q_rated)
@@ -140,12 +194,12 @@ def test_unknown_mode_ignores_q_hvac_kw_but_uses_on_frac():
     nll_on = filter_from_params(params, on_scrambled, 5, remainder_gate=0.0, q_rated_mode="unknown").nll
     assert not jnp.allclose(nll0, nll_on, rtol=0.0, atol=1e-5)
 
-    ol0 = open_loop_from_params(params, data, 5, t0=20.0, q0=0.7, remainder_gate=0.0, q_rated_mode="unknown")
+    ol0 = open_loop_from_params(params, data, 5, t0=20.0, q0=FILTER_Q0_KW, remainder_gate=0.0, q_rated_mode="unknown")
     ol_kw = open_loop_from_params(
-        params, kw_scrambled, 5, t0=20.0, q0=0.7, remainder_gate=0.0, q_rated_mode="unknown"
+        params, kw_scrambled, 5, t0=20.0, q0=FILTER_Q0_KW, remainder_gate=0.0, q_rated_mode="unknown"
     )
     ol_on = open_loop_from_params(
-        params, on_scrambled, 5, t0=20.0, q0=0.7, remainder_gate=0.0, q_rated_mode="unknown"
+        params, on_scrambled, 5, t0=20.0, q0=FILTER_Q0_KW, remainder_gate=0.0, q_rated_mode="unknown"
     )
     assert jnp.allclose(ol0.y_pred, ol_kw.y_pred)
     assert not jnp.allclose(ol0.y_pred, ol_on.y_pred, rtol=0.0, atol=1e-5)

@@ -9,7 +9,6 @@ the printed T metric is holdout open-loop rollout.
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
 
 from _paths import out_dir
@@ -62,16 +61,23 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     names = list(uq.laplace.names)
+    hess_pd = bool(uq.laplace.positive_definite)
     print("\nTrain MAP (Laplace sd from train sum-NLL Hessian; nets frozen at MAP)")
-    print(f"{'parameter':<12} {'MAP':>10} {'sd':>10} {'95% CI':>22}")
+    if not hess_pd:
+        print("Hessian is not positive definite; ±1.96 sd intervals are omitted.")
+    print(f"{'parameter':<12} {'MAP':>10} {'sd':>10} {'±1.96 sd':>22}")
     sd_map, ci_map, est_map = {}, {}, {}
     for i, name in enumerate(names):
         est = float(uq.laplace.mean[i])
         sd = float(uq.laplace.sd[i])
-        rel = min(sd / max(abs(est), 1e-6), 3.0)
-        lo = est * math.exp(-1.96 * rel)
-        hi = est * math.exp(1.96 * rel)
-        print(f"{name:<12} {est:10.3f} {sd:10.3f} [{lo:8.3f}, {hi:8.3f}]")
+        if hess_pd:
+            lo = est - 1.96 * sd
+            hi = est + 1.96 * sd
+            ci_txt = f"[{lo:8.3f}, {hi:8.3f}]"
+        else:
+            lo = hi = float("nan")
+            ci_txt = "omitted"
+        print(f"{name:<12} {est:10.3f} {sd:10.3f} {ci_txt:>22}")
         est_map[name] = est
         sd_map[name] = sd
         ci_map[name] = [lo, hi]
@@ -102,6 +108,7 @@ def main(argv: list[str] | None = None) -> None:
             "estimated": est_map,
             "sd": sd_map,
             "ci95": ci_map,
+            "uq_positive_definite": hess_pd,
             "holdout_open_loop": {"rmse_k": ident.holdout_rmse, "mae_k": ident.holdout_mae},
             "split": ident.split.scheme,
             "n_train": ident.split.n_train,

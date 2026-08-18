@@ -220,6 +220,8 @@ def timeseries_from_frame(frame: pd.DataFrame, hvac_mode: str = "auto") -> Times
     t_out = _series(table, "t_out_c")
     rh_out = _as_fraction(_series(table, "rh_out", default=0.50))
     rh_in = _as_fraction(_series(table, "rh_in", default=0.40))
+    # Always derive ω from the observed interval T and RH. Precomputed omega
+    # columns are ignored so a plant-state export cannot leak true indoor T.
     omega_out = np.asarray(humidity_ratio(t_out, rh_out), dtype=np.float32)
     omega_in = np.asarray(humidity_ratio(t_in, rh_in), dtype=np.float32)
 

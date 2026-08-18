@@ -15,7 +15,7 @@ import jax
 import jax.numpy as jnp
 from jax import random
 
-from pi_nsde_building_thermal.physics import BuildingParams
+from pi_nsde_building_thermal.physics import DEFAULT_PRIOR, BuildingParams
 from pi_nsde_building_thermal.sde import SdeNoise
 from pi_nsde_building_thermal.synthetic import Timeseries
 
@@ -133,6 +133,7 @@ def _mlp(net, x):
 
 
 def _zero_last_layer(net: list) -> list:
+    """Zero last-layer weights and biases so Stage A remainder/diffusion start at 0."""
     w, b = net[-1]
     return list(net[:-1]) + [(jnp.zeros_like(w), jnp.zeros_like(b))]
 
@@ -204,7 +205,7 @@ def init_params(
     q_rated_mode: str = "unknown",
 ) -> ModelParams:
     """Feature mean/std must be computed on **train** only (caller passes the train slice)."""
-    prior = prior or BuildingParams(C=6.0, R=6.0, A_s=4.0, beta=80.0, Q_rated=6.0)
+    prior = prior or DEFAULT_PRIOR
     mode = normalize_q_rated_mode(q_rated_mode)
     feat = exogenous_features(data, q_rated_mode=mode)
     feat_mean = jnp.mean(feat, axis=0)
@@ -253,6 +254,43 @@ def remainder_and_sigma_scale(
     return r, jnp.exp(0.5 * log_s)
 
 
+def pearson_r2(a, b) -> jnp.ndarray:
+    """Ridge-stabilized squared Pearson correlation (population moments)."""
+    a = a - jnp.mean(a)
+    b = b - jnp.mean(b)
+    return (jnp.mean(a * b) ** 2) / ((jnp.mean(a**2) + 1e-6) * (jnp.mean(b**2) + 1e-6))
+
+
+def remainder_diagnostics(
+    params: ModelParams,
+    data: Timeseries,
+    remainder_gate: float = 1.0,
+    q_rated_mode: str = "unknown",
+) -> dict[str, float]:
+    """Train-set remainder and σ_T(φ) summaries. Not a holdout metric."""
+    r, scale = remainder_and_sigma_scale(
+        params,
+        data,
+        remainder_gate=remainder_gate,
+        sigma_gate=remainder_gate,
+        q_rated_mode=q_rated_mode,
+    )
+    sigma = decode_noise(params.phys).sigma_T * scale
+    dt = data.t_out_c - data.t_in_c
+    ghi = data.ghi_w_m2 / 1000.0
+    qh = hvac_feature(data, q_rated_mode)
+    return {
+        "rms": float(jnp.sqrt(jnp.mean(r**2))),
+        "max_abs": float(jnp.max(jnp.abs(r))),
+        "rho2_dT": float(pearson_r2(r, dt)),
+        "rho2_I": float(pearson_r2(r, ghi)),
+        "rho2_hvac": float(pearson_r2(r, qh)),
+        "sigma_T_mean": float(jnp.mean(sigma)),
+        "sigma_T_min": float(jnp.min(sigma)),
+        "sigma_T_max": float(jnp.max(sigma)),
+    }
+
+
 def identifiability_penalty(
     remainder_kw: jnp.ndarray,
     data: Timeseries,
@@ -268,13 +306,7 @@ def identifiability_penalty(
     dt = data.t_out_c - data.t_in_c
     ghi = data.ghi_w_m2 / 1000.0
     qh = hvac_feature(data, q_rated_mode)
-
-    def corr2(a, b):
-        a = a - jnp.mean(a)
-        b = b - jnp.mean(b)
-        return (jnp.mean(a * b) ** 2) / ((jnp.mean(a**2) + 1e-6) * (jnp.mean(b**2) + 1e-6))
-
-    return jnp.mean(r**2) + corr2(r, dt) + corr2(r, ghi) + corr2(r, qh)
+    return jnp.mean(r**2) + pearson_r2(r, dt) + pearson_r2(r, ghi) + pearson_r2(r, qh)
 
 
 def weak_prior(phys: PhysRaw, prior: BuildingParams) -> jnp.ndarray:

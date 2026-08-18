@@ -67,7 +67,7 @@ class SyntheticConfig:
     seed: int = 0
     latitude_deg: float = 41.8
     start_doy: int = 15
-    t_in_init_c: float = 20.0
+    t_in_init_c: float = 20.0  # heating default; cooling remaps this default to 25.5 C
     heating_capacity_kw: float = 9.0
     hvac_mode: Literal["heating", "cooling"] = "heating"
     deadband_k: float = 0.45
@@ -211,6 +211,8 @@ def _simulate_sde(key, weather: dict[str, jnp.ndarray], t_hours: jnp.ndarray, cf
             dw_t,
             dw_q,
         )
+        # Export the incoming (pre-update) 1-minute state. The identifier
+        # averages post-step T; that one-substep offset is O(0.02 K).
         return (t_next, q_next, equip_on), (t_in, q_hvac, equip_on, w_in, q_int)
 
     inputs = (t_out, ghi, omega_out, wind, setpoints, mu_q, dW_t, dW_q)
@@ -264,6 +266,10 @@ def generate_synthetic_building(config: SyntheticConfig | None = None) -> Synthe
     arrays = arrays._replace(
         t_in_c=arrays.t_in_c + cfg.t_in_noise_k * noise[:, 0],
         t_out_c=arrays.t_out_c + cfg.weather_noise_k * noise[:, 1],
+    )
+    arrays = arrays._replace(
+        omega_out=humidity_ratio(arrays.t_out_c, arrays.rh_out),
+        omega_in=humidity_ratio(arrays.t_in_c, arrays.rh_in),
     )
 
     interval_s = cfg.report_dt_min * 60.0

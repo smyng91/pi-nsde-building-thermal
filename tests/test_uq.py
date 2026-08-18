@@ -19,9 +19,14 @@ def test_uq_positive_variances_and_shapes():
     cfg = TrainConfig(steps=8, n_sub=5, q_rated="unknown")
     uq = quantify_uncertainty(params, data.arrays, filt, cfg, n_sub=5, max_samples=4)
     assert "Q_rated" in uq.laplace.names
-    assert uq.laplace.mean.shape == (9,)
-    assert uq.laplace.sd.shape == (9,)
+    assert "beta" not in uq.laplace.names
+    assert uq.laplace.mean.shape == (8,)
+    assert uq.laplace.sd.shape == (8,)
     assert jnp.all(uq.laplace.sd > 0)
+    assert jnp.isfinite(uq.laplace.eig_min)
+    assert jnp.isfinite(uq.laplace.eig_max)
+    assert uq.laplace.eig_shift >= 0.0
+    assert uq.laplace.cond > 0.0
     assert uq.t_sd_state.shape == data.arrays.t_in_c.shape
     assert jnp.all(uq.t_sd_state > 0)
     assert uq.t_q95.shape == data.arrays.t_in_c.shape
@@ -39,4 +44,5 @@ def test_known_mode_laplace_omits_q_rated():
     cfg = TrainConfig(steps=8, n_sub=5, q_rated="known")
     uq = quantify_uncertainty(params, data.arrays, filt, cfg, n_sub=5, max_samples=2)
     assert "Q_rated" not in uq.laplace.names
-    assert uq.laplace.mean.shape == (8,)
+    assert "beta" not in uq.laplace.names
+    assert uq.laplace.mean.shape == (7,)

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from _paths import out_dir
 
+from pi_nsde_building_thermal.constants import FILTER_Q0_KW
 from pi_nsde_building_thermal.io import estimates_json, load_checkpoint, load_timeseries_csv, timeseries_to_frame, write_json
 from pi_nsde_building_thermal.model import canonicalize_hvac
 from pi_nsde_building_thermal.synthetic import chronological_split
@@ -76,7 +77,7 @@ def main(argv: list[str] | None = None) -> None:
             arrays,
             n_sub,
             t0=float(arrays.t_in_c[0]),
-            q0=0.7,
+            q0=FILTER_Q0_KW,
             remainder_gate=gate,
             q_rated_mode=q_rated,
         )

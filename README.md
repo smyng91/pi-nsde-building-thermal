@@ -18,7 +18,7 @@ Indoor temperature is the **measurement**, not the result. Overlaying a Kalman m
 
 ## Identifiability
 
-On heating intervals, `Q_rated` and `C` both scale `Q/C` in `dT/dt = (Q_rated u)/C + …`, so they alias if the equipment is rarely off. The same alias appears on cooling intervals with `u ≤ 0`. Occupied and setback **off** intervals give a free-response time constant (`RC` / `UA/C`). On the default seven-day winter twin, unknown-`Q_rated` MAP errors are large (`C` about 47%, `Q_rated` about 45%) while holdout open-loop `T` RMSE stays around 0.11 K — that is why indoor `T` is not the score. Wind-inflated UA and occupancy structure add extra scale, but they do not make `Q_rated` as clean as metered kW. Training stays two-stage, the holdout is chronological, hidden `Q_int` is unused, and the twin is **not** given easier excitation to make the alias disappear.
+On heating intervals, `Q_rated` and `C` both scale `Q/C` in `dT/dt = (Q_rated u)/C + …`, so they alias if the equipment is rarely off. The same alias appears on cooling intervals with `u ≤ 0`. Occupied and setback **off** intervals give a free-response time constant (`RC` / `UA/C`). The map `C, Q_rated → α·`, `R → R/α` also leaves the wind-inflated loss `UA_eff/C = (1+k v)/(RC)` invariant; solar, occupancy, and the scalar moisture term `β(ω_a−ω_i)/C` break an exact symmetry and leave an ill-conditioned valley. On the default seven-day winter twin, unknown-`Q_rated` MAP errors are large (`C` about 43%, `R` about 67%, `Q_rated` about 42%) while holdout open-loop `T` RMSE stays around 0.13 K — lower than the metered-kW holdout RMSE of about 0.22 K. That is why indoor `T` is not the score. Metered HVAC kW recovers winter `C` and `R` but does **not** recover winter solar aperture (~46%) or summer `R` (~19%) when solar aperture is co-estimated. A same-budget remainder-off gray-box fit leaves the same qualitative limits (runtime `Q_rated`–`C` aliasing; summer `R` bias). The remainder penalty is Pearson `r²` (linear leakage only). The remainder is a bounded micro-residual (`|r|≤0.18 kW`). Humidity ratios use the observed interval `T` (not 1-minute plant `T`); `β` is frozen at the prior. Training stays two-stage, the holdout is chronological, hidden `Q_int` is unused, and the twin is **not** given easier excitation to make the alias disappear. These are observability limits under one week of closed-loop hysteresis, not a claim about multi-week or actively excited datasets.
 
 ## Evaluation protocol (no leakage)
 
@@ -54,9 +54,9 @@ $$
 &=
 \frac{1}{C}\bigl[
 UA_{\mathrm{eff}}(T_a-T)+A_s I+\beta(\omega_a-\omega_i)
-+Q_{\mathrm{rated}} u+Q_{\mathrm{int}}+r_\theta(\mathbf{u})
++Q_{\mathrm{rated}} u+Q_{\mathrm{int}}+r_\theta(\boldsymbol{\phi})
 \bigr]\,\mathrm{d}t
-+\sigma_T(\mathbf{u})\,\mathrm{d}W_T, \\
++\sigma_T(\boldsymbol{\phi})\,\mathrm{d}W_T, \\
 \mathrm{d}Q_{\mathrm{int}}
 &=
 \kappa\bigl(\mu(t)-Q_{\mathrm{int}}\bigr)\,\mathrm{d}t
@@ -71,8 +71,8 @@ $$
 | `Q_rated` | Learnable rated capacity magnitude [kW] in unknown mode; skipped when kW is given |
 | `Q_hvac` | `Q_rated u` (unknown) or metered kW (known, optimistic; negative when cooling) |
 | `Q_int` | Unmeasured occupancy/appliance gain (OU process) |
-| `r_θ(u)` | Small neural remainder of exogenous weather/HVAC-on, **identifiability-constrained** so it cannot absorb UA or `1/C` |
-| `σ_T(u)` | Input-dependent neural diffusion (state-independent, so Kalman stays Gaussian) |
+| `r_θ(φ)` | Small neural remainder of exogenous weather/HVAC-on, **identifiability-constrained** (Pearson `r²`; linear leakage only) so it cannot absorb UA or `1/C` linearly |
+| `σ_T(φ)` | Input-dependent neural diffusion (state-independent, so Kalman stays Gaussian) |
 | `μ(t)` | Daily Fourier mean occupancy |
 
 **Observation model (thermostat interval average):**
@@ -86,7 +86,7 @@ $$
 e_k\sim\mathcal{N}(0,\sigma_y^2).
 $$
 
-This is not a point sample $T(t_k)$. The **training** likelihood is the Gaussian Kalman filter of the Euler–Maruyama discretization, observing the mean of the substeps in each 5-minute interval. The **holdout `T` metric** does not use that update.
+This is not a point sample $T(t_k)$. The **training** likelihood is the Gaussian Kalman filter of the Euler–Maruyama discretization, observing the **post-step** mean of the 1-minute substeps in each 5-minute interval. The digital-twin exporter averages incoming (pre-update) 1-minute states; the one-substep offset is far below sensor noise. The **holdout `T` metric** does not use that update.
 
 ## Uncertainty quantification
 
@@ -94,7 +94,7 @@ Laplace / observed information is computed on **train only**:
 
 1. Objective = **sum** of train interval NLLs + scaled priors / identifiability penalty (same critical points as the mean-NLL trainer; Hessian is not `mean NLL / N`).
 2. Joint unconstrained Hessian over `{C, R, Q_rated (unknown mode), A_s, β, σ_T, σ_q, σ_y, κ}` **and** Fourier `μ_q` coefficients. Neural remainder/diffusion **weights stay at MAP** (not included).
-3. Delta method back to positive units; 95% CIs for the physical parameters. `C` and `R` intervals are from this joint train Hessian — not a silent 2-parameter slice mixed with a mean-NLL joint Hessian.
+3. Delta method back to positive units; 95% local intervals for the physical parameters when the Hessian is positive definite. These are not calibrated frequentist CIs. `C` and `R` intervals are from this joint train Hessian — not a silent 2-parameter slice mixed with a mean-NLL joint Hessian.
 
 Intervals **condition on neural weights at MAP** (and include occupancy priors), so they can be narrower than a full profile over the nets. They are still the correct *scale* (sum of train NLL, train series only). Filter bands on train `T`/`Q_int` are state uncertainty, not holdout accuracy.
 
@@ -113,7 +113,7 @@ The **combination** that we could not find as a published, reusable stack:
 
 1. Physics RC **SDE drift** with HVAC as **observed signed runtime** `Q_rated u` (capacity optional / learned),
 2. **Latent OU occupancy** rather than white noise only on `T`,
-3. **Interval-average** observation operator (integrated sampling of `T` over the thermostat interval),
+3. **Post-step interval-mean** observation operator on 1-minute Euler–Maruyama maps (not a Dirac sample of `T` at `t_k`),
 4. Two-stage, identifiability-constrained neural remainder + input-dependent `σ_T(u)`,
 5. JAX autodiff through the Kalman path likelihood, plus **train-only Laplace UQ** on `{C,R,Q_rated,…}` using the **sum** NLL Hessian,
 6. Chronological holdout **open-loop `T`** as the dynamics check (not in-sample filter tracking).

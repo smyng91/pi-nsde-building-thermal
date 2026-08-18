@@ -131,9 +131,12 @@ def plot_example(
         est,
         width=0.3,
         color="#d62728",
-        yerr=1.96 * sd,
-        capsize=4,
-        label="Train MAP ± 1.96 sd (Laplace)",
+        **(
+            {"yerr": 1.96 * sd, "capsize": 4}
+            if bool(uq.laplace.positive_definite)
+            else {}
+        ),
+        label="Train MAP ± 1.96 sd (Laplace)" if uq.laplace.positive_definite else "Train MAP",
     )
     ax.set_xticks(xs, names)
     ax.set_ylabel("C [kWh/K], R [K/kW]" + (", Q_rated [kW]" if unknown else ""))

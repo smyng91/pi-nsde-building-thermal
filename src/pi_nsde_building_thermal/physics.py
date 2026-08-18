@@ -48,6 +48,11 @@ class BuildingParams(NamedTuple):
     """
 
 
+# Identifier default. beta matches the digital-twin plant so latent-load
+# misspecification is not a confounder of (C, R, Q_rated, A_s).
+DEFAULT_PRIOR = BuildingParams(C=6.0, R=6.0, A_s=4.0, beta=120.0, Q_rated=6.0)
+
+
 def saturation_vapor_pressure_pa(temp_c):
     """Magnus-Tetens saturation vapor pressure [Pa]."""
     return MAGNUS_A * jnp.exp(MAGNUS_B * temp_c / (temp_c + MAGNUS_C))

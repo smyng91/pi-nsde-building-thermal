@@ -67,7 +67,8 @@ def euler_maruyama_matrices(
 ):
     """Affine EM maps for x=[T, Q_int] and running sum S of T.
 
-    x' = F_2 x + g_2,  S' = S + T.
+    x' = F_2 x + g_2 + ε. The accumulator matches the plant exporter:
+    S' = S + T' (post-step indoor temperature).
     """
     a_t = -ua_kw_per_k / capacity_kwh_per_k
     a_q = 1.0 / capacity_kwh_per_k
@@ -81,10 +82,17 @@ def euler_maruyama_matrices(
         [
             [1.0 + dt_h * a_t, dt_h * a_q, 0.0],
             [0.0, 1.0 - dt_h * kappa, 0.0],
-            [1.0, 0.0, 1.0],
+            [1.0 + dt_h * a_t, dt_h * a_q, 1.0],
         ]
     )
-    qd = jnp.diag(jnp.array([dt_h * sigma_T**2, dt_h * sigma_q**2, 0.0]))
+    qt = dt_h * sigma_T**2
+    qd = jnp.array(
+        [
+            [qt, 0.0, qt],
+            [0.0, dt_h * sigma_q**2, 0.0],
+            [qt, 0.0, qt],
+        ]
+    )
     return f2, f3, qd
 
 
@@ -102,12 +110,13 @@ def exogenous_plus_latent_b(
     kappa,
     dt_h,
 ):
-    """Affine intercept g for [T, Q, S] after one EM step (S intercept 0)."""
+    """Affine intercept g for [T, Q, S] after one EM step (post-step accumulator)."""
     q_sol = params.A_s * ghi_w_m2 / 1000.0
     q_lat = params.beta * (omega_out - omega_in)
     b_t = (ua_kw_per_k * t_out_c + q_sol + q_lat + q_hvac_kw + remainder_kw) / capacity_kwh_per_k
     b_q = kappa * mu_q_kw
-    return jnp.array([dt_h * b_t, dt_h * b_q, 0.0])
+    dt_bt = dt_h * b_t
+    return jnp.array([dt_bt, dt_h * b_q, dt_bt])
 
 
 def interval_average_kalman(
@@ -223,9 +232,11 @@ def interval_average_open_loop(
     q0: float,
     kappa: float,
 ) -> OpenLoopResult:
-    """Physics (+ remainder, μ_q) open-loop interval-average T.
+    """Deterministic mean-Euler interval-average T (diffusion coefficients zero).
 
-    Exogenous inputs only: weather and known HVAC. Indoor T is not an input.
+    Same affine maps as Euler--Maruyama with σ_T = σ_q = 0: an explicit Euler
+    ODE step, not a stochastic integrator. Exogenous inputs only: weather and
+    known HVAC. Indoor T is not an input.
     """
     n = t_out_c.shape[0]
     ua = envelope_ua_kw_per_k(params.R, wind_m_s)

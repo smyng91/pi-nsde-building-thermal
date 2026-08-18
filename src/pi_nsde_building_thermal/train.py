@@ -1,6 +1,7 @@
 """Two-stage MAP of the interval-average Kalman likelihood (train only).
 
-Stage A: neural remainder frozen at 0; fit {C, R, Q_rated (if unknown), A_s, β, σ, κ, Fourier μ_q}.
+Stage A: neural remainder frozen at 0; fit {C, R, Q_rated (if unknown), A_s, σ, κ, Fourier μ_q}.
+β is frozen at the identifier prior (plant truth by default).
 Stage B: unfreeze remainder (identifiability penalty), smaller LR; optionally
 freeze C, R, and Q_rated first, then jointly fine-tune.
 
@@ -17,6 +18,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
+from pi_nsde_building_thermal.constants import FILTER_Q0_KW
 from pi_nsde_building_thermal.model import (
     ModelParams,
     canonicalize_hvac,
@@ -31,7 +33,7 @@ from pi_nsde_building_thermal.model import (
     remainder_and_sigma_scale,
     weak_prior,
 )
-from pi_nsde_building_thermal.physics import BuildingParams
+from pi_nsde_building_thermal.physics import DEFAULT_PRIOR, BuildingParams
 from pi_nsde_building_thermal.sde import (
     FilterResult,
     OpenLoopResult,
@@ -76,9 +78,9 @@ class TrainConfig:
     lambda_occ: float = 0.05
     q_rated: str = "unknown"
     hvac_mode: str = "auto"
-    prior: BuildingParams = field(
-        default_factory=lambda: BuildingParams(C=6.0, R=6.0, A_s=4.0, beta=80.0, Q_rated=6.0)
-    )
+    neural_remainder: bool = True
+    learn_beta: bool = False
+    prior: BuildingParams = field(default_factory=lambda: DEFAULT_PRIOR)
 
     def __post_init__(self):
         self.q_rated = normalize_q_rated_mode(self.q_rated)
@@ -154,7 +156,7 @@ def filter_from_params(
         n_sub,
         dt_sub,
         t0=data.t_in_c[0],
-        q0=0.7,
+        q0=FILTER_Q0_KW,
     )
 
 
@@ -247,7 +249,10 @@ def map_objective_sum(
     """Train MAP objective with **sum** of interval NLLs — use this for Laplace UQ.
 
     Same critical points as ``total_loss`` (mean NLL) because
-    J_sum = N * J_mean. Hessian(J_sum) is the observed information scale.
+    J_sum = N * J_mean. The log-prior term is therefore scaled by N relative
+    to the nominal σ=0.7 in ``weak_prior``: σ_eff = 0.7 / sqrt(N λ_prior).
+    Hessian(J_sum) is the observed-information scale of that equivalent
+    objective, not a separately weighted Bayesian posterior.
     """
     mean_loss, aux = total_loss(params, data, cfg, remainder_gate=remainder_gate, lambda_id=lambda_id)
     n = data.t_in_c.shape[0]
@@ -261,6 +266,7 @@ def _trainable_mask(
     freeze_sigma_net: bool,
     freeze_cr: bool,
     freeze_q_rated: bool,
+    freeze_beta: bool,
 ) -> ModelParams:
     ones = jax.tree.map(lambda x: jnp.ones_like(x), params)
     phys = ones.phys
@@ -271,6 +277,8 @@ def _trainable_mask(
         )
     if freeze_q_rated:
         phys = phys._replace(raw_Q_rated=jnp.zeros_like(params.phys.raw_Q_rated))
+    if freeze_beta:
+        phys = phys._replace(raw_beta=jnp.zeros_like(params.phys.raw_beta))
     rem = jax.tree.map(lambda x: jnp.zeros_like(x), params.remainder_net) if freeze_remainder else ones.remainder_net
     sig = jax.tree.map(lambda x: jnp.zeros_like(x), params.sigma_net) if freeze_sigma_net else ones.sigma_net
     return ModelParams(
@@ -295,6 +303,7 @@ def _run_stage(
     freeze_sigma_net: bool,
     freeze_cr: bool,
     freeze_q_rated: bool,
+    freeze_beta: bool,
     stage_name: str,
     verbose: bool,
     cosine: bool,
@@ -309,6 +318,7 @@ def _run_stage(
         freeze_sigma_net=freeze_sigma_net,
         freeze_cr=freeze_cr,
         freeze_q_rated=freeze_q_rated,
+        freeze_beta=freeze_beta,
     )
     if cosine:
         lr = optax.cosine_decay_schedule(learning_rate, max(steps, 1), alpha=0.55)
@@ -383,10 +393,14 @@ def train_sde(data: Timeseries, config: TrainConfig | None = None, verbose: bool
         print(
             f"Two-stage ID on n={int(data.t_in_c.shape[0])} train steps | "
             f"A={n_a} (remainder=0), B_freeze_CR={n_b1}, B_joint={n_b2} | "
-            f"{hvac_obs} | hvac_mode={cfg.hvac_mode}"
+            f"{hvac_obs} | hvac_mode={cfg.hvac_mode} | "
+            f"{'PIN-SDE remainder on in B' if cfg.neural_remainder else 'gray-box remainder off'} | "
+            f"{'learn beta' if cfg.learn_beta else f'beta frozen at {cfg.prior.beta:g}'}"
         )
 
     freeze_q_known = cfg.q_rated == "known"
+    freeze_beta = not cfg.learn_beta
+    use_net = bool(cfg.neural_remainder)
     params, h_a = _run_stage(
         params,
         data,
@@ -399,6 +413,7 @@ def train_sde(data: Timeseries, config: TrainConfig | None = None, verbose: bool
         freeze_sigma_net=True,
         freeze_cr=False,
         freeze_q_rated=freeze_q_known,
+        freeze_beta=freeze_beta,
         stage_name="A",
         verbose=verbose,
         cosine=False,
@@ -409,12 +424,13 @@ def train_sde(data: Timeseries, config: TrainConfig | None = None, verbose: bool
         cfg,
         steps=n_b1,
         learning_rate=cfg.stage_b_lr,
-        remainder_gate=1.0,
+        remainder_gate=1.0 if use_net else 0.0,
         lambda_id=cfg.lambda_id_b,
-        freeze_remainder=False,
-        freeze_sigma_net=False,
+        freeze_remainder=not use_net,
+        freeze_sigma_net=not use_net,
         freeze_cr=True,
         freeze_q_rated=True,
+        freeze_beta=freeze_beta,
         stage_name="B1",
         verbose=verbose,
         cosine=True,
@@ -425,18 +441,19 @@ def train_sde(data: Timeseries, config: TrainConfig | None = None, verbose: bool
         cfg,
         steps=n_b2,
         learning_rate=cfg.stage_b_lr,
-        remainder_gate=1.0,
+        remainder_gate=1.0 if use_net else 0.0,
         lambda_id=cfg.lambda_id_b,
-        freeze_remainder=False,
-        freeze_sigma_net=False,
+        freeze_remainder=not use_net,
+        freeze_sigma_net=not use_net,
         freeze_cr=False,
         freeze_q_rated=freeze_q_known,
+        freeze_beta=freeze_beta,
         stage_name="B2",
         verbose=verbose,
         cosine=True,
     )
 
-    remainder_gate = 1.0 if (n_b1 + n_b2) > 0 else 0.0
+    remainder_gate = 1.0 if (use_net and (n_b1 + n_b2) > 0) else 0.0
     lambda_id = cfg.lambda_id_b if remainder_gate > 0.5 else cfg.lambda_id
     filt = filter_from_params(
         params, data, cfg.n_sub, remainder_gate=remainder_gate, q_rated_mode=cfg.q_rated
