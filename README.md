@@ -160,13 +160,6 @@ uv run python examples/infer_csv.py output/synthetic_thermostat.csv output/check
 
 Outputs in `outputs/`: `synthetic_timeseries.csv` (includes a `split` column; `q_int_kw_hidden` is eval-only; `hvac_kw` is plant truth / eval), `parameter_estimates.json` (MAP, train Laplace sd/CI, holdout open-loop RMSE/MAE, `known_kw_reference` when running unknown), `identification.png`, `training_history.csv` (stage column).
 
-Paper figures (both seasons) and a PDF of `paper/main.tex`:
-
-```bash
-uv run python scripts/generate_paper_figures.py
-latexmk -pdf -cd paper/main.tex
-```
-
 Python API (after `uv sync --extra dev`):
 
 ```python
