@@ -5,16 +5,18 @@ the measurement, not the success metric: the score that matters is
 **holdout open-loop** $T$ with frozen $C$, $R$, and (by default)
 learned $`Q_{\mathrm{rated}}`$.
 
+From the repo root, after `uv sync --extra dev` (see the [README](../README.md)):
+
 ```bash
-.\.venv\Scripts\python.exe examples/generate_synthetic.py
-.\.venv\Scripts\python.exe examples/train_csv.py output/synthetic_thermostat.csv
-.\.venv\Scripts\python.exe examples/infer_csv.py output/synthetic_thermostat.csv output/checkpoint.pkl --mode holdout
+uv run python examples/generate_synthetic.py
+uv run python examples/train_csv.py output/synthetic_thermostat.csv
+uv run python examples/infer_csv.py output/synthetic_thermostat.csv output/checkpoint.pkl --mode holdout
 ```
 
 Or, in one shot:
 
 ```bash
-.\.venv\Scripts\python.exe examples/run_demo.py
+uv run python examples/run_demo.py
 ```
 
 Custom files go through the same `train_csv.py` / `infer_csv.py` entry

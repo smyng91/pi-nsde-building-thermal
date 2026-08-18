@@ -131,33 +131,43 @@ Mathematical models and the identification framework:
 
 ## Install and run
 
-Python 3.10+, CPU JAX. Clone and install:
+Python 3.10+ and CPU JAX. Install [uv](https://docs.astral.sh/uv/), then from the repo root:
 
 ```bash
-git clone git@github.com:smyng91/pi-nsde-building-thermal.git
+git clone https://github.com/smyng91/pi-nsde-building-thermal.git
 cd pi-nsde-building-thermal
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest -q
+uv sync --extra dev
+uv run pytest -q
 ```
+
+`uv run` uses the project environment on Windows, macOS, and Linux (no venv activation, no OS-specific Python paths).
 
 Package demo (digital twin, unknown $`Q_{\mathrm{rated}}`$):
 
 ```bash
-.\.venv\Scripts\python.exe -m pi_nsde_building_thermal.example --q-rated unknown
+uv run python -m pi_nsde_building_thermal.example --q-rated unknown
 ```
 
 Custom CSV (see [examples/README.md](examples/README.md)):
 
 ```bash
-.\.venv\Scripts\python.exe examples/generate_synthetic.py
-.\.venv\Scripts\python.exe examples/train_csv.py output/synthetic_thermostat.csv --q-rated unknown
-.\.venv\Scripts\python.exe examples/infer_csv.py output/synthetic_thermostat.csv output/checkpoint.pkl --mode holdout
+uv run python examples/generate_synthetic.py
+uv run python examples/train_csv.py output/synthetic_thermostat.csv --q-rated unknown
+uv run python examples/infer_csv.py output/synthetic_thermostat.csv output/checkpoint.pkl --mode holdout
 ```
 
-`--q-rated unknown` is the default. `--q-rated known` reproduces the optimistic metered-kW case. `--q-rated both` runs unknown then known into the same JSON (`q_rated_runs`).
+`--q-rated unknown` is the default. `--q-rated known` reproduces the optimistic metered-kW case. `--q-rated both` runs unknown then known into the same JSON (`q_rated_runs`). Add `--hvac-mode cooling` on the demo for the summer twin.
 
 Outputs in `outputs/`: `synthetic_timeseries.csv` (includes a `split` column; `q_int_kw_hidden` is eval-only; `hvac_kw` is plant truth / eval), `parameter_estimates.json` (MAP, train Laplace sd/CI, holdout open-loop RMSE/MAE, `known_kw_reference` when running unknown), `identification.png`, `training_history.csv` (stage column).
+
+Paper figures (both seasons) and a PDF of `paper/main.tex`:
+
+```bash
+uv run python scripts/generate_paper_figures.py
+latexmk -pdf -cd paper/main.tex
+```
+
+Python API (after `uv sync --extra dev`):
 
 ```python
 from pi_nsde_building_thermal.synthetic import generate_synthetic_building

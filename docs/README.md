@@ -39,4 +39,14 @@ Time is in hours so that $`C\,\mathrm{d}T/\mathrm{d}t`$ has units of power:
 | `pi_nsde_building_thermal.io` | CSV aliases and checkpoints |
 | `pi_nsde_building_thermal.synthetic` | Digital-twin plant (evaluation only for true $C$, $R$) |
 
-Install and run: see the repository [README](../README.md). CSV examples: [examples/README.md](../examples/README.md).
+## Install and run
+
+[uv](https://docs.astral.sh/uv/), Python 3.10+. Same commands on Windows, macOS, and Linux:
+
+```bash
+uv sync --extra dev
+uv run pytest -q
+uv run python -m pi_nsde_building_thermal.example --q-rated unknown
+```
+
+CSV examples: [examples/README.md](../examples/README.md). Full setup: [README](../README.md).

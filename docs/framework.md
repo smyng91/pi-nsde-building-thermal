@@ -45,7 +45,7 @@ Entry points:
 | `identify_building(arrays, TrainConfig, holdout_days=2)` | Split + fit + holdout open-loop |
 | `quantify_uncertainty(...)` | Laplace on **train** only |
 | `load_timeseries_csv` / `save_checkpoint` | Custom files |
-| `python -m pi_nsde_building_thermal.example --q-rated unknown` | Full demo |
+| `uv run python -m pi_nsde_building_thermal.example --q-rated unknown` | Full demo |
 
 ## No-leakage protocol
 
@@ -118,9 +118,9 @@ Required (aliases accepted in `pi_nsde_building_thermal.io`):
 Optional: GHI, RH, wind, setpoint, `hvac_kw` (known-kW protocol only; negative while cooling). Rows must already be chronological. Unsigned cooling runtime in a generic `hvac_on_frac` column needs `--hvac-mode cooling`.
 
 ```bash
-python examples/generate_synthetic.py
-python examples/train_csv.py output/synthetic_thermostat.csv --q-rated unknown
-python examples/infer_csv.py output/synthetic_thermostat.csv output/checkpoint.pkl --mode holdout
+uv run python examples/generate_synthetic.py
+uv run python examples/train_csv.py output/synthetic_thermostat.csv --q-rated unknown
+uv run python examples/infer_csv.py output/synthetic_thermostat.csv output/checkpoint.pkl --mode holdout
 ```
 
 Checkpoints are pickles of fitted `ModelParams` plus `TrainConfig` metadata (`save_checkpoint` / `load_checkpoint`).
@@ -129,4 +129,4 @@ Checkpoints are pickles of fitted `ModelParams` plus `TrainConfig` metadata (`sa
 
 Parameters are fitted by automatic differentiation through the Kalman path likelihood (`jax.grad` / `optax`). The SDE is **not** a liquid neural net and **not** a deterministic PINN residual collocation. The closest classical stack is a gray-box RC-SDE with Kalman MLE (CTSM-style), plus an interval-average observation, optional unknown capacity, and a gated neural remainder.
 
-Python 3.10+; see `pyproject.toml` for `jax`, `optax`, `numpy`, `pandas`, `matplotlib`.
+Python 3.10+ via [uv](https://docs.astral.sh/uv/) (`uv sync --extra dev`). See `pyproject.toml` for `jax`, `optax`, `numpy`, `pandas`, `matplotlib`. Same `uv run …` commands on Windows, macOS, and Linux.
