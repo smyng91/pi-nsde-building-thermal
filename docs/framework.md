@@ -49,12 +49,12 @@ Entry points:
 
 ## No-leakage protocol
 
-One contiguous series is cut **chronologically**: prefix = train, suffix = holdout. Default: last **2 of 7** days ($1440$ train intervals, $576$ holdout at $`5\,\mathrm{min}`$). Shorter series fall back to the last $`30\%`$.
+One contiguous series is cut **chronologically**: prefix = train, suffix = holdout. Default: last **2 of 7** days ($1440$ train intervals, $576$ holdout at $5\,\mathrm{min}$). Shorter series fall back to the last $30\%$.
 
 | Rule | Implementation |
 | --- | --- |
 | No shuffle | `chronological_split` only |
-| Fit on train | Holdout never enters NLL, remainder features, Fourier $`\mu_q`$, or noise |
+| Fit on train | Holdout never enters NLL, remainder features, Fourier $\mu_q$, or noise |
 | Causal features | Weather, HVAC channel, clock at interval $k$. No future rows. No indoor $T$ as a remainder input |
 | Hidden occupancy | `q_int_kw_hidden` ignored even if present |
 | True parameters | Evaluation only on the digital twin |
@@ -66,43 +66,43 @@ Tests scramble `q_hvac_kw` with `on_frac` fixed: unknown-mode NLL is unchanged. 
 
 A remainder that is free while $C$ and $R$ move can absorb envelope and capacity. Training on the train prefix is therefore staged:
 
-1. **Stage A** ($1800$ steps, remainder gate $0$): fit $`\{C,R,Q_{\mathrm{rated}}\text{ (if unknown)},A_s,\beta,\sigma_T,\sigma_q,\sigma_y,\kappa,\mu\}`$.
-2. **Stage B1** ($300$ steps, smaller LR, stronger identifiability penalty): remainder on; **freeze** $C$, $R$, and $`Q_{\mathrm{rated}}`$.
-3. **Stage B2** ($1400$ steps): joint fine-tune with the same penalty. In **known**-kW mode, $`Q_{\mathrm{rated}}`$ stays frozen (unused).
+1. **Stage A** ($1800$ steps, remainder gate $0$): fit $\{C,R,Q_{\mathrm{rated}}\text{ (if unknown)},A_s,\beta,\sigma_T,\sigma_q,\sigma_y,\kappa,\mu\}$.
+2. **Stage B1** ($300$ steps, smaller LR, stronger identifiability penalty): remainder on; **freeze** $C$, $R$, and $Q_{\mathrm{rated}}$.
+3. **Stage B2** ($1400$ steps): joint fine-tune with the same penalty. In **known**-kW mode, $Q_{\mathrm{rated}}$ stays frozen (unused).
 
 Optimizer: Adam with global-norm clip $5$. Feature mean/std are computed on the **train** slice only.
 
 Trainer loss (mean interval NLL, optimizer scale):
 
-```math
+$$
 J_{\mathrm{mean}}
 =
 \frac{1}{N}\sum_k \ell_k
 + \lambda_{\mathrm{id}}\,\mathcal{P}_{\mathrm{id}}
 + \lambda_{\mathrm{prior}}\,\mathcal{P}_{C,R,Q,A_s}
 + \lambda_{\mathrm{occ}}\,\mathcal{P}_\mu.
-```
+$$
 
-Defaults: $`\lambda_{\mathrm{id}}=0.15`$ (A), $`0.45`$ (B); $`\lambda_{\mathrm{prior}}=0.002`$; $`\lambda_{\mathrm{occ}}=0.05`$.
+Defaults: $\lambda_{\mathrm{id}}=0.15$ (A), $0.45$ (B); $\lambda_{\mathrm{prior}}=0.002$; $\lambda_{\mathrm{occ}}=0.05$.
 
-Laplace uses the **sum** $`N\cdot J_{\mathrm{mean}}`$ (same critical point; Hessian is observed-information scale, not $`\mathrm{mean}/N`$).
+Laplace uses the **sum** $N\cdot J_{\mathrm{mean}}$ (same critical point; Hessian is observed-information scale, not $\mathrm{mean}/N$).
 
 ## Holdout metric
 
-Start from the last **train** filter state $`(T,Q_{\mathrm{int}})`$. Roll out interval-average $T$ on the holdout suffix with holdout weather and:
+Start from the last **train** filter state $(T,Q_{\mathrm{int}})$. Roll out interval-average $T$ on the holdout suffix with holdout weather and:
 
-- unknown mode: $`\hat Q_{\mathrm{rated}}\,u^{\mathrm{holdout}}`$
+- unknown mode: $\hat Q_{\mathrm{rated}}\,u^{\mathrm{holdout}}$
 - known mode: holdout `q_hvac_kw`
 
 Holdout $T$ is compared **after** the rollout. It is not used in a Kalman update. Report RMSE / MAE in kelvin. A secondary number is train mean Kalman NLL (likelihood quality, not $T$ accuracy).
 
 ## Uncertainty quantification
 
-`quantify_uncertainty` builds a finite-difference Hessian of the **train sum-NLL MAP** in unconstrained (`PhysRaw` + Fourier $`\mu_q`$) coordinates.
+`quantify_uncertainty` builds a finite-difference Hessian of the **train sum-NLL MAP** in unconstrained (`PhysRaw` + Fourier $\mu_q$) coordinates.
 
-- Joint over $`\{C,R,Q_{\mathrm{rated}}\text{ (unknown mode)},A_s,\beta,\sigma_T,\sigma_q,\sigma_y,\kappa\}`$ and Fourier coefficients.
+- Joint over $\{C,R,Q_{\mathrm{rated}}\text{ (unknown mode)},A_s,\beta,\sigma_T,\sigma_q,\sigma_y,\kappa\}$ and Fourier coefficients.
 - Neural remainder / diffusion **weights stay at MAP** (not in the Hessian).
-- Delta method back to positive units; 95% intervals. Filter bands on train $T$/$`Q_{\mathrm{int}}`$ are state uncertainty, not holdout accuracy.
+- Delta method back to positive units; 95% intervals. Filter bands on train $T$/$Q_{\mathrm{int}}$ are state uncertainty, not holdout accuracy.
 
 Intervals **condition on neural weights at MAP**, so they can be overconfident and can sit around an aliased mode. They are not a substitute for sampling the nets.
 

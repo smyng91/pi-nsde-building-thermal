@@ -3,7 +3,7 @@
 These scripts train and run inference on a thermostat/weather CSV. Indoor temperature is
 the measurement, not the success metric: the score that matters is
 **holdout open-loop** $T$ with frozen $C$, $R$, and (by default)
-learned $`Q_{\mathrm{rated}}`$.
+learned $Q_{\mathrm{rated}}$.
 
 From the repo root, after `uv sync --extra dev` (see the [README](../README.md)):
 
@@ -27,7 +27,7 @@ points. Time must already be chronological (no shuffled rows).
 | `generate_synthetic.py` | Digital-twin CSV (not a lab trace) |
 | `train_csv.py` | Two-stage ID, chronological holdout, checkpoint |
 | `infer_csv.py` | Open-loop / holdout / filter diagnostic |
-| `run_demo.py` | Generate → train (unknown $`Q_{\mathrm{rated}}`$) → holdout infer |
+| `run_demo.py` | Generate → train (unknown $Q_{\mathrm{rated}}$) → holdout infer |
 
 Default `--q-rated unknown`: the identifier sees **signed runtime**
 and learns rated capacity. Heating is positive, cooling is negative.

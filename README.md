@@ -46,9 +46,9 @@ Fourier `μ_q` and `σ_q` have an L2 / log prior so latent occupancy cannot free
 
 ## Energy-balance SDE
 
-Indoor temperature $T$ and a latent internal-gain / occupancy state $`Q_{\mathrm{int}}`$:
+Indoor temperature $T$ and a latent internal-gain / occupancy state $Q_{\mathrm{int}}$:
 
-```math
+$$
 \begin{aligned}
 \mathrm{d}T
 &=
@@ -62,7 +62,7 @@ UA_{\mathrm{eff}}(T_a-T)+A_s I+\beta(\omega_a-\omega_i)
 \kappa\bigl(\mu(t)-Q_{\mathrm{int}}\bigr)\,\mathrm{d}t
 +\sigma_q\,\mathrm{d}W_Q.
 \end{aligned}
-```
+$$
 
 | Symbol | Role |
 | --- | --- |
@@ -77,16 +77,16 @@ UA_{\mathrm{eff}}(T_a-T)+A_s I+\beta(\omega_a-\omega_i)
 
 **Observation model (thermostat interval average):**
 
-```math
+$$
 \bar y_k
 =
 \frac{1}{\Delta}\int_{t_{k-1}}^{t_k} T(s)\,\mathrm{d}s
 + e_k,
 \qquad
 e_k\sim\mathcal{N}(0,\sigma_y^2).
-```
+$$
 
-This is not a point sample $`T(t_k)`$. The **training** likelihood is the Gaussian Kalman filter of the Euler–Maruyama discretization, observing the mean of the substeps in each 5-minute interval. The **holdout `T` metric** does not use that update.
+This is not a point sample $T(t_k)$. The **training** likelihood is the Gaussian Kalman filter of the Euler–Maruyama discretization, observing the mean of the substeps in each 5-minute interval. The **holdout `T` metric** does not use that update.
 
 ## Uncertainty quantification
 
@@ -142,7 +142,7 @@ uv run pytest -q
 
 `uv run` uses the project environment on Windows, macOS, and Linux (no venv activation, no OS-specific Python paths).
 
-Package demo (digital twin, unknown $`Q_{\mathrm{rated}}`$):
+Package demo (digital twin, unknown $Q_{\mathrm{rated}}$):
 
 ```bash
 uv run python -m pi_nsde_building_thermal.example --q-rated unknown

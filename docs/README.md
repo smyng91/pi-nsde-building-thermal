@@ -11,21 +11,21 @@ The same pages are published on the [GitHub wiki](https://github.com/smyng91/pi-
 
 ## What the identifier is
 
-The identifier is a gray-box **stochastic differential equation** in JAX. Indoor temperature is the **measurement**, not the score. HVAC **runtime** is observed and **signed** (heating positive, cooling negative); rated capacity $`Q_{\mathrm{rated}}`$ is optional. The default protocol is `--q-rated unknown`.
+The identifier is a gray-box **stochastic differential equation** in JAX. Indoor temperature is the **measurement**, not the score. HVAC **runtime** is observed and **signed** (heating positive, cooling negative); rated capacity $Q_{\mathrm{rated}}$ is optional. The default protocol is `--q-rated unknown`.
 
 A Kalman mean that tracks the thermostat series is **not** a success metric. The dynamics check is a chronological **holdout open-loop** rollout that sees weather and runtime (or metered kW), not a filter overlay of the same $T$.
 
 ## Units
 
-Time is in hours so that $`C\,\mathrm{d}T/\mathrm{d}t`$ has units of power:
+Time is in hours so that $C\,\mathrm{d}T/\mathrm{d}t$ has units of power:
 
 | Quantity | Unit |
 | --- | --- |
-| $C$ | $`\mathrm{kWh\,K}^{-1}`$ |
-| $R$ | $`\mathrm{K\,kW}^{-1}`$ ($`UA = 1/R`$) |
-| Heat fluxes | $`\mathrm{kW}`$ |
-| $`Q_{\mathrm{rated}}`$ | $`\mathrm{kW}`$ |
-| $u$ | signed runtime in $`[-1,1]`$ (heat +, cool −) |
+| $C$ | $\mathrm{kWh\,K}^{-1}$ |
+| $R$ | $\mathrm{K\,kW}^{-1}$ ($UA = 1/R$) |
+| Heat fluxes | $\mathrm{kW}$ |
+| $Q_{\mathrm{rated}}$ | $\mathrm{kW}$ |
+| $u$ | signed runtime in $[-1,1]$ (heat +, cool −) |
 
 ## Code map
 
