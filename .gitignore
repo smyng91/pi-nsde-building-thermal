@@ -17,11 +17,17 @@ output/
 outputs/
 *.npz
 
-# Manuscript and paper build (not part of the public code repo)
-/paper/
+# Manuscript LaTeX build artifacts (source, figures, and PDF are tracked)
 /paper.tex
-/paper.pdf
-/scripts/
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.toc
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
 
 # Editor / OS
 .DS_Store
