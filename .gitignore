@@ -23,6 +23,9 @@ outputs/
 /paper.pdf
 /scripts/
 
+# Local critic–implementor loop (not part of the public code repo)
+/harness.py
+
 # Editor / OS
 .DS_Store
 Thumbs.db

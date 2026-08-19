@@ -120,8 +120,34 @@ def test_manuscript_laplace_coverage_matches_csv():
         r"collinear $UA",
         r"over 30\% of global",
         "known a priori",
+        "better on winter known HVAC",
+        "typical thermostat week",
+        r"to $\KnownCrel$\% and $\KnownRrel$\% of plant truth",
+        r"brings MAP $C$ to $\KnownCrel$\% (heating)",
     ):
         assert phrase not in text, phrase
+    assert r"to within $\KnownCrel$" in text
+    assert "better on summer known HVAC" in text
+    assert r"diag(0.6^2,1.0^2)" in text
+
+
+def test_ablation_rmse_macros_match_prose():
+    """PIN-SDE has lower winter-known holdout RMSE; gray-box is lower only in summer known."""
+    macros = _macros()
+    assert float(macros["GbKnownHoldRMSE"]) > float(macros["KnownHoldRMSE"])
+    assert float(macros["CoolGbKnownHoldRMSE"]) < float(macros["CoolKnownHoldRMSE"])
+    assert float(macros["GbUnknownHoldRMSE"]) > float(macros["UnknownHoldRMSE"])
+    assert float(macros["CoolGbUnknownHoldRMSE"]) > float(macros["CoolUnknownHoldRMSE"])
+
+
+def test_seed_study_rmse_below_one_kelvin():
+    import json
+
+    payload = json.loads((FIGS / "seed_study.json").read_text(encoding="utf-8"))
+    rmses = [float(r["holdout_rmse"]) for r in payload["rows"]]
+    assert rmses and max(rmses) < 1.0
+    text = (PAPER / "main.tex").read_text(encoding="utf-8")
+    assert r"below $1\,\mathrm{K}$ on every seed" in text
 
 
 def test_holdout_csv_rmse_matches_macros():

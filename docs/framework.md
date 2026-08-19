@@ -109,7 +109,7 @@ Holdout RMSE / MAE is a **deterministic mean-Euler ODE** rollout (diffusion coef
 
 Intervals **condition on neural weights at MAP**, so they can be overconfident and can sit around an aliased mode. They are not a substitute for sampling the nets. The reported twins include a remainder-off / constant-$\sigma_T$ gray-box ablation with the same Adam budget.
 
-Weak log-priors on $(C,R,Q_{\mathrm{rated}})$ are centered at $(6,6,6)$. Along the runtime scaling valley the prior can influence the location of $\alpha$ without pinning $Q/C$.
+Weak log-priors on $(C,R,Q_{\mathrm{rated}})$ are centered at $(6,6,6)$. Along the runtime scaling valley, first-order Adam leaves $\alpha$ near the initialization: turning the prior off barely moves the winter runtime MAP, while $Q/C$ stays near truth.
 
 ## CSV I/O
 
