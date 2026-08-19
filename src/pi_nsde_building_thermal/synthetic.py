@@ -3,7 +3,9 @@
 HVAC on/off is simulated with a hysteretic heating or cooling thermostat and
 exported as signed interval runtime (positive heat, negative cool). The
 identifier never treats HVAC as a latent switching process: runtime is
-observed; rated capacity may be known or learned.
+observed; the constant rated capacity may be learned. Winter and summer
+twins share ``TRUE_PARAMS`` and ``TRUE_NOISE``; only weather, solar geometry,
+and heating versus cooling setpoints change.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from jax import random
 from pi_nsde_building_thermal.physics import BuildingParams, humidity_ratio, saturation_vapor_pressure_pa
 from pi_nsde_building_thermal.sde import SdeNoise, simulate_em_step
 
+# Shared plant for every season. Do not give winter and summer different
+# (C, R, A_s, beta, Q_rated) or process/measurement noise.
 TRUE_PARAMS = BuildingParams(C=9.5, R=3.6, A_s=8.5, beta=120.0, Q_rated=9.0)
 TRUE_NOISE = SdeNoise(sigma_T=0.055, sigma_q=0.14, sigma_y=0.07, kappa=1.25)
 
@@ -39,9 +43,10 @@ class Timeseries(NamedTuple):
     """Thermostat-interval arrays.
 
     ``hvac_on_frac`` is signed observed runtime in [-1, 1] (positive heating,
-    negative cooling). ``q_hvac_kw`` is plant heat into the node (negative when
-    cooling; eval-only in unknown-Q_rated mode). ``q_int_kw`` is hidden and
-    must not be a feature, Kalman input, or loss target.
+    negative cooling). ``q_hvac_kw`` is plant HVAC power into the node
+    (``Q_rated * u``; negative when cooling; eval-only in unknown-Q_rated
+    mode). ``q_int_kw`` is hidden and must not be a feature, Kalman input, or
+    loss target.
     """
 
     t_hours: jnp.ndarray
@@ -68,7 +73,6 @@ class SyntheticConfig:
     latitude_deg: float = 41.8
     start_doy: int = 15
     t_in_init_c: float = 20.0  # heating default; cooling remaps this default to 25.5 C
-    heating_capacity_kw: float = 9.0
     hvac_mode: Literal["heating", "cooling"] = "heating"
     deadband_k: float = 0.45
     indoor_rh: float = 0.40
@@ -171,7 +175,7 @@ def _simulate_sde(key, weather: dict[str, jnp.ndarray], t_hours: jnp.ndarray, cf
     ghi = weather["ghi_w_m2"]
     wind = weather["wind_m_s"]
     omega_out = humidity_ratio(t_out, weather["rh_out"])
-    capacity = cfg.heating_capacity_kw
+    capacity = float(TRUE_PARAMS.Q_rated)
     deadband = cfg.deadband_k
     rh_in = cfg.indoor_rh
     cooling = cfg.hvac_mode == "cooling"
@@ -299,7 +303,7 @@ def generate_synthetic_building(config: SyntheticConfig | None = None) -> Synthe
     return SyntheticDataset(
         frame=frame,
         arrays=arrays,
-        true_params=TRUE_PARAMS._replace(Q_rated=cfg.heating_capacity_kw),
+        true_params=TRUE_PARAMS,
         true_noise=TRUE_NOISE,
         config=cfg,
     )

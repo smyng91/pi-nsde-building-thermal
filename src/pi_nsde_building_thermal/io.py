@@ -190,7 +190,7 @@ def timeseries_from_frame(frame: pd.DataFrame, hvac_mode: str = "auto") -> Times
 
     Required: indoor T, outdoor T, and HVAC runtime (heating, cooling, signed
     fraction, or runtime seconds). Optional: GHI, humidity, wind, setpoint,
-    delivered kW. ``hvac_mode='cooling'`` negates unsigned generic runtime.
+    delivered HVAC power (`hvac_kw`). ``hvac_mode='cooling'`` negates unsigned generic runtime.
     """
     if frame.empty:
         raise ValueError("Empty timeseries table.")

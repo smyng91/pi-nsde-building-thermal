@@ -8,8 +8,9 @@ The estimator identifies an effective indoor node:
 equivalent to using R_eff = R / (1 + k_wind v_wind) in (T_a - T) / R_eff.
 C is effective thermal capacity, R is envelope resistance (inverse of UA),
 A_s is solar aperture, and β converts a humidity-ratio difference into a
-latent/infiltration heat flux. Q_hvac is heat into the node: positive for
-heating, negative for cooling.
+latent/infiltration heat flux. Q_hvac(t) is delivered HVAC power into the
+node (kW; positive heating, negative cooling). Q_rated is a constant rated
+capacity (kW), not that time series.
 """
 
 from __future__ import annotations
@@ -40,11 +41,11 @@ class BuildingParams(NamedTuple):
     beta: float
     """Latent / moisture-driven heat coefficient [kW per kg/kg]."""
     Q_rated: float = 6.0
-    """Rated HVAC capacity [kW]. Prior/init scale is not plant truth.
+    """Constant rated HVAC capacity [kW] (same magnitude for heat and cool).
 
-    Unknown-Q_rated identification uses ``Q_hvac = Q_rated * u`` with signed
-    runtime ``u ∈ [-1, 1]``. The synthetic plant still generates data with
-    ``SyntheticConfig.heating_capacity_kw`` as the magnitude.
+    This is not the HVAC-power time series. Unknown-mode identification uses
+    ``Q_hvac(t) = Q_rated * u(t)`` with signed runtime ``u ∈ [-1, 1]``. The
+    digital-twin plant uses ``TRUE_PARAMS.Q_rated`` in every season.
     """
 
 

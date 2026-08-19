@@ -1,8 +1,8 @@
 """Learnable physical {C, R, Q_rated, …} plus a constrained neural remainder/diffusion.
 
 Features are contemporaneous (available at interval k): weather, HVAC on/off
-(or metered kW in the optimistic known-Q_rated protocol), and clock-time
-Fourier terms. Indoor T and hidden Q_int are never remainder inputs.
+(or metered HVAC power in the optimistic metered-Q_hvac protocol), and
+clock-time Fourier terms. Indoor T and hidden Q_int are never remainder inputs.
 True delivered HVAC kW must not enter unknown-Q_rated features.
 """
 
@@ -139,20 +139,20 @@ def _zero_last_layer(net: list) -> list:
 
 
 def hvac_feature(data: Timeseries, q_rated_mode: str = "unknown") -> jnp.ndarray:
-    """Observed HVAC channel: signed runtime fraction, or metered kW in known mode."""
+    """Observed HVAC channel: signed runtime, or metered HVAC power in known mode."""
     if q_rated_mode == "unknown":
         return data.hvac_on_frac
     return data.q_hvac_kw
 
 
 def observed_hvac_kw(params: "ModelParams", data: Timeseries, q_rated_mode: str = "unknown") -> jnp.ndarray:
-    """HVAC heat into the indoor node [kW] passed to the SDE.
+    """Delivered HVAC power into the indoor node [kW] passed to the SDE.
 
-    Unknown mode: ``Q_rated * u`` with learnable positive ``Q_rated`` and signed
-    runtime ``u ∈ [-1, 1]`` (positive heating, negative cooling). Never reads
-    ``data.q_hvac_kw``. Known mode: metered/plant ``q_hvac_kw`` (negative when
-    cooling). Call ``canonicalize_hvac`` first so unsigned cooling runtime is
-    negated.
+    Unknown mode: ``Q_hvac = Q_rated * u`` with a learnable positive constant
+    rated capacity and signed runtime ``u ∈ [-1, 1]``. Never reads
+    ``data.q_hvac_kw``. Known mode: metered plant HVAC power ``q_hvac_kw``
+    (negative when cooling). Call ``canonicalize_hvac`` first so unsigned
+    cooling runtime is negated.
     """
     if q_rated_mode == "unknown":
         return decode_building(params.phys).Q_rated * data.hvac_on_frac
@@ -299,7 +299,7 @@ def identifiability_penalty(
     """Stop the neural remainder from absorbing UA, solar aperture, or 1/C.
 
     HVAC runtime is observed (signed: heating positive, cooling negative); a remainder
-    correlated with that channel (or metered kW in known mode) would bias C and
+    correlated with that channel (or metered HVAC power) would bias C and
     Q_rated. Indoor T enters only this train-set regularizer, not the remainder features.
     """
     r = remainder_kw

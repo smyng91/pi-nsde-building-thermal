@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pi-nsde-building-thermal"
 version = "0.1.0"
-description = "Physics-informed neural SDE in JAX that estimates building thermal capacity and envelope resistance from thermostat and weather time series, with Laplace UQ."
+description = "Gray-box SDE in JAX for identifiability of lumped building thermal parameters from smart-thermostat runtime, with train-only Laplace UQ."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

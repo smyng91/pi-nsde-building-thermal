@@ -2,7 +2,7 @@
 """Write a synthetic thermostat/weather CSV for the training examples.
 
 This is a digital twin, not a laboratory trace. HVAC on/off is observed;
-delivered kW is written for optional known-capacity runs and must not be
+plant HVAC power is written for optional metered-Q_hvac runs and must not be
 required by ``train_csv.py --q-rated unknown``.
 """
 

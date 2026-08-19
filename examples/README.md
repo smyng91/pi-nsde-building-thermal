@@ -32,7 +32,7 @@ points. Time must already be chronological (no shuffled rows).
 Default `--q-rated unknown`: the identifier sees **signed runtime**
 and learns rated capacity. Heating is positive, cooling is negative.
 `--hvac-mode cooling` negates unsigned generic on/off. `--q-rated known` is the
-optimistic protocol that consumes a `hvac_kw` column (negative while cooling).
+optimistic metered-$Q_{\mathrm{hvac}}$ protocol that consumes a `hvac_kw` column (negative while cooling).
 
 Outputs: `output/checkpoint.pkl`, `output/estimates.json`.
 

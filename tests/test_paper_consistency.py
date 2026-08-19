@@ -56,6 +56,8 @@ def test_stale_learned_beta_macros_are_gone():
         assert key not in macros
     assert macros["TrueBeta"] == "120"
     assert macros["FixedBeta"] == "120"
+    for key in ("C", "R", "Qrated", "As", "Beta", "RC", "QC"):
+        assert macros[f"True{key}"] == macros[f"CoolTrue{key}"], key
 
 
 def test_zscore_macros_match_figure_csv():
@@ -124,11 +126,17 @@ def test_manuscript_laplace_coverage_matches_csv():
         "typical thermostat week",
         r"to $\KnownCrel$\% and $\KnownRrel$\% of plant truth",
         r"brings MAP $C$ to $\KnownCrel$\% (heating)",
+        r"$Q_\mathrm{rated}$ either metered",
+        "Q_rated either metered",
+        "paired HVAC-capacity parameter recovery",
     ):
         assert phrase not in text, phrase
     assert r"to within $\KnownCrel$" in text
     assert "better on summer known HVAC" in text
     assert r"diag(0.6^2,1.0^2)" in text
+    assert r"Rated capacity $Q_\mathrm{rated}$ is a constant" in text
+    assert r"Metered $Q_\mathrm{hvac}$" in text
+    assert "share one building" in text
 
 
 def test_ablation_rmse_macros_match_prose():

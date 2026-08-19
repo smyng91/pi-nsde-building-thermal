@@ -1,6 +1,15 @@
 """Synthetic SDE plant and thermostat export."""
 
-from pi_nsde_building_thermal.synthetic import SyntheticConfig, generate_synthetic_building
+import jax.numpy as jnp
+import numpy as np
+
+from pi_nsde_building_thermal.synthetic import (
+    TRUE_NOISE,
+    TRUE_PARAMS,
+    SyntheticConfig,
+    generate_synthetic_building,
+    occupancy_schedule_kw,
+)
 
 
 def test_synthetic_shapes_and_hvac_are_observed():
@@ -29,3 +38,22 @@ def test_indoor_temperature_stays_in_reasonable_band():
     t_in = data.frame["t_in_c"].to_numpy()
     assert t_in.min() > 12.0
     assert t_in.max() < 26.0
+
+
+def test_winter_and_summer_share_building_parameters():
+    """Seasonal twins differ in weather and HVAC mode, not in the plant."""
+    heat = generate_synthetic_building(SyntheticConfig(days=2, seed=0, hvac_mode="heating"))
+    cool = generate_synthetic_building(SyntheticConfig(days=2, seed=0, hvac_mode="cooling"))
+    assert heat.true_params == cool.true_params == TRUE_PARAMS
+    assert heat.true_noise == cool.true_noise == TRUE_NOISE
+    assert heat.config.indoor_rh == cool.config.indoor_rh
+    assert heat.config.deadband_k == cool.config.deadband_k
+    assert heat.config.q_int_init_kw == cool.config.q_int_init_kw
+    t = heat.arrays.t_hours
+    assert jnp.allclose(occupancy_schedule_kw(t), occupancy_schedule_kw(cool.arrays.t_hours))
+    assert abs(float(heat.arrays.t_out_c.mean()) - float(cool.arrays.t_out_c.mean())) > 10.0
+    q_on = float(TRUE_PARAMS.Q_rated)
+    for data in (heat, cool):
+        q = np.abs(np.asarray(data.arrays.q_hvac_kw))
+        assert float(q.max()) <= q_on + 1e-5
+        assert float(q.max()) > 0.5 * q_on

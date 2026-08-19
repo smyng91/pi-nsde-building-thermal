@@ -1,6 +1,6 @@
 # Mathematical models
 
-This page specifies the gray-box RC model used to identify an occupied house: a lumped energy-balance **drift**, a latent occupancy **SDE**, and a thermostat **interval-average** observation. HVAC **signed runtime** is an observed input. Rated capacity may be known or learned. Implementation: `pi_nsde_building_thermal.physics`, `pi_nsde_building_thermal.sde`.
+The identifier asks whether lumped $C$, $R$, and $Q_{\mathrm{rated}}$ are recoverable from thermostat runtime. This page specifies the gray-box RC model behind that question: a lumped energy-balance **drift**, a latent occupancy **SDE**, and a thermostat **interval-average** observation. HVAC **signed runtime** is an observed input. Rated capacity may be known or learned. Implementation: `pi_nsde_building_thermal.physics`, `pi_nsde_building_thermal.sde`.
 
 How these equations are fitted is in [framework](framework.md).
 
@@ -135,16 +135,18 @@ The digital twin integrates Euler--Maruyama at $1\,\mathrm{min}$ and exports the
 
 Weather and HVAC are held ZOH over the interval (as in a typical 5-minute export).
 
-## 4. HVAC: observed on/off, optional capacity
+## 4. HVAC: runtime, rated capacity, and HVAC power
+
+Three quantities are distinct. **Rated HVAC capacity** $Q_{\mathrm{rated}}$ is a constant positive scalar (kW), the same magnitude for heating and cooling. **HVAC power** $Q_{\mathrm{hvac}}(t)$ is the time-varying thermal flux into the indoor node (kW; positive heating, negative cooling). **Metered** $Q_{\mathrm{hvac}}$ means the identifier is given that plant series (thermal kW, not utility-meter watts) and does not estimate $Q_{\mathrm{rated}}$.
 
 HVAC hysteresis is **not** modeled as a latent switching SDE. Runtime is an observed signed fraction $u\in[-1,1]$: positive is heating, negative is cooling. Rated capacity $Q_{\mathrm{rated}}$ stays positive. Unsigned heating datasets use $u\in[0,1]$ as before. Unsigned cooling runtime (`--hvac-mode cooling`, or a `cooling_on` column) is stored as $u\le 0$. Reverse-cycle files with both heat and cool columns become $u = u_{\mathrm{heat}}-u_{\mathrm{cool}}$.
 
 | Protocol | Drift HVAC term | What the identifier must not use |
 | --- | --- | --- |
 | **Unknown** $Q_{\mathrm{rated}}$ (default) | $Q_{\mathrm{hvac}}=Q_{\mathrm{rated}}\,u$ | Plant `q_hvac_kw` / true rated kW |
-| **Known** kW (optimistic) | interval-mean delivered $Q_{\mathrm{hvac}}$ (negative while cooling) | — |
+| **Metered** $Q_{\mathrm{hvac}}$ (optimistic) | interval-mean delivered $Q_{\mathrm{hvac}}$ (negative while cooling) | — |
 
-Positive parameters use a shifted softplus, e.g. $C=\mathrm{softplus}(c_{\mathrm{raw}})+0.3$. Prior / init for $Q_{\mathrm{rated}}$ is $6\,\mathrm{kW}$, not plant truth $9\,\mathrm{kW}$.
+Winter and summer digital twins share the same plant $(C,R,A_s,\beta,Q_{\mathrm{rated}})$, occupancy schedule, and noise. Only weather, solar geometry, and heating versus cooling setpoints differ. Positive parameters use a shifted softplus, e.g. $C=\mathrm{softplus}(c_{\mathrm{raw}})+0.3$. Prior / init for $Q_{\mathrm{rated}}$ is $6\,\mathrm{kW}$, not plant truth $9\,\mathrm{kW}$.
 
 ## 5. Euler–Maruyama and the Kalman likelihood
 
@@ -212,7 +214,7 @@ where $\widehat{\mathrm{corr}}^2$ is ridge-stabilized Pearson $r^2$ (`pearson_r2
 
 Indoor $T$ enters **only** this train-set regularizer, not remainder features. Fourier $\mu$ and $\sigma_q$ have a weak prior so occupancy cannot freely take up a kW bias.
 
-On the default seven-day winter digital twin with unknown $Q_{\mathrm{rated}}$, MAP $C$ and $Q_{\mathrm{rated}}$ remain aliased (relative errors of tens of percent) while holdout open-loop $T$ RMSE can still be $\sim 0.13\,\mathrm{K}$, lower than the metered-kW holdout RMSE. That is why indoor $T$ is not the identification score. A same-budget remainder-off (gray-box) fit leaves that runtime aliasing intact (absolute $R$ errors need not match).
+On the default seven-day winter digital twin with unknown $Q_{\mathrm{rated}}$, MAP $C$ and $Q_{\mathrm{rated}}$ remain aliased (relative errors of tens of percent) while holdout open-loop $T$ RMSE can still be $\sim 0.13\,\mathrm{K}$, lower than the metered-$Q_{\mathrm{hvac}}$ holdout RMSE. That is why indoor $T$ is not the identification score. A same-budget remainder-off (gray-box) fit leaves that runtime aliasing intact (absolute $R$ errors need not match).
 
 ## 7. Digital-twin plant (evaluation only)
 

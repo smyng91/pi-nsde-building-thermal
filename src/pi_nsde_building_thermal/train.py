@@ -386,9 +386,9 @@ def train_sde(data: Timeseries, config: TrainConfig | None = None, verbose: bool
 
     if verbose:
         hvac_obs = (
-            "HVAC = Q_rated * signed runtime (capacity unknown)"
+            "HVAC power = Q_rated * signed runtime (rated capacity unknown)"
             if cfg.q_rated == "unknown"
-            else "HVAC = metered q_hvac_kw (capacity known)"
+            else "HVAC power = metered q_hvac_kw (rated capacity not estimated)"
         )
         print(
             f"Two-stage ID on n={int(data.t_in_c.shape[0])} train steps | "
@@ -518,7 +518,7 @@ def identify_building(
         if fit.q_rated == "unknown":
             hvac_txt = "weather + estimated Q_rated × signed holdout runtime"
         else:
-            hvac_txt = "weather + known HVAC kW"
+            hvac_txt = "weather + metered HVAC power"
         print(
             f"Holdout open-loop T ({hvac_txt}, frozen MAP): "
             f"RMSE={rmse:.3f} K  MAE={mae:.3f} K"

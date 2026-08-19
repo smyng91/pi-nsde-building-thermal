@@ -1,6 +1,6 @@
 # Framework
 
-This page describes how the equations in [mathematical models](mathematical-models.md) are fitted in JAX: no leakage, two-stage MAP, holdout open-loop $T$, train-only Laplace UQ, and CSV I/O.
+This page describes how the equations in [mathematical models](mathematical-models.md) are fitted in JAX: no leakage, two-stage MAP, holdout open-loop $T$, train-only Laplace UQ, and CSV I/O. Indoor $T$ is the measurement; parameter recovery against digital-twin truth is the identification score.
 
 ## Architecture
 
@@ -58,7 +58,7 @@ One contiguous series is cut **chronologically**: prefix = train, suffix = holdo
 | Causal features | Weather, HVAC channel, clock at interval $k$. No future rows. No indoor $T$ as a remainder input |
 | Hidden occupancy | `q_int_kw_hidden` ignored even if present |
 | True parameters | Evaluation only on the digital twin |
-| Unknown capacity | `q_hvac_kw` is not read in the filter, remainder, or holdout HVAC channel |
+| Unknown $Q_{\mathrm{rated}}$ | `q_hvac_kw` is not read in the filter, remainder, or holdout HVAC channel |
 
 Tests scramble `q_hvac_kw` with `on_frac` fixed: unknown-mode NLL is unchanged. Scrambling `hvac_on_frac` changes NLL, which is the expected contrast.
 
@@ -68,7 +68,7 @@ A remainder that is free while $C$ and $R$ move can absorb envelope and capacity
 
 1. **Stage A** ($1800$ steps, remainder gate $0$): fit $\{C,R,Q_{\mathrm{rated}}\text{ (if unknown)},A_s,\sigma_T^{\mathrm{base}},\sigma_q,\sigma_y,\kappa,\mu\}$. $\beta$ stays at plant truth (default $120$). Diffusion and remainder nets stay off ($g=0$), so $\sigma_T(\phi)=\sigma_T^{\mathrm{base}}$.
 2. **Stage B1** ($300$ steps, smaller LR, stronger identifiability penalty): remainder on; **freeze** $C$, $R$, and $Q_{\mathrm{rated}}$.
-3. **Stage B2** ($1400$ steps): joint fine-tune with the same penalty. In **known**-kW mode, $Q_{\mathrm{rated}}$ stays frozen (unused).
+3. **Stage B2** ($1400$ steps): joint fine-tune with the same penalty. In the **metered**-$Q_{\mathrm{hvac}}$ protocol, $Q_{\mathrm{rated}}$ stays frozen (unused).
 
 Gray-box ablation (`TrainConfig.neural_remainder=False`) repeats the same three stage lengths with remainder and $\sigma_T$ nets frozen.
 
@@ -120,7 +120,7 @@ Required (aliases accepted in `pi_nsde_building_thermal.io`):
 - HVAC on/off (`hvac_on_frac`, `heating_on`, `cooling_on`, or `hvac_runtime_s`)
 - `timestamp` or `t_hours`
 
-Optional: GHI, RH, wind, setpoint, `hvac_kw` (known-kW protocol only; negative while cooling). Rows must already be chronological. Unsigned cooling runtime in a generic `hvac_on_frac` column needs `--hvac-mode cooling`.
+Optional: GHI, RH, wind, setpoint, `hvac_kw` (metered-$Q_{\mathrm{hvac}}$ protocol only; negative while cooling). Rows must already be chronological. Unsigned cooling runtime in a generic `hvac_on_frac` column needs `--hvac-mode cooling`.
 
 ```bash
 uv run python examples/generate_synthetic.py

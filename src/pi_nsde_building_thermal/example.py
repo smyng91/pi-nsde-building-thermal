@@ -6,7 +6,7 @@ rollout with frozen MAP C, R, Q_rated (unknown mode) and train-fit remainder / �
 using holdout weather and HVAC on/off only (estimated Q_rated × signed u).
 
 Default ``--q-rated unknown``: the identifier sees interval runtime fraction, not
-delivered kW. ``--q-rated known`` is the older optimistic metered-kW protocol.
+delivered HVAC power. ``--q-rated known`` is the optimistic metered-Q_hvac protocol.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--q-rated",
         choices=("known", "unknown", "both"),
         default="unknown",
-        help="known: metered kW (optimistic). unknown: on/off only, learn Q_rated. both: run unknown then known.",
+        help="known: metered HVAC power (optimistic). unknown: runtime only, learn Q_rated. both: run unknown then known.",
     )
     p.add_argument(
         "--hvac-mode",
@@ -62,7 +62,7 @@ def _true_map(dataset) -> dict[str, float]:
     return {
         "C": true.C,
         "R": true.R,
-        "Q_rated": float(dataset.config.heating_capacity_kw),
+        "Q_rated": float(true.Q_rated),
         "A_s": true.A_s,
         "beta": true.beta,
         "sigma_T": float(dataset.true_noise.sigma_T),
@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None) -> None:
         print("Unknown Q_rated: identifier sees hvac_on_frac only, not delivered q_hvac_kw / true 9 kW.")
         print("Holdout open-loop uses estimated Q_rated × holdout on/off + weather.")
     if "known" in modes:
-        print("Known Q_rated: optimistic metered kW (plant q_hvac_kw).")
+        print("Metered Q_hvac: identifier receives plant delivered HVAC power; Q_rated is not estimated.")
     print("Primary T metric: holdout open-loop (not in-sample Kalman T RMSE).")
     print()
 

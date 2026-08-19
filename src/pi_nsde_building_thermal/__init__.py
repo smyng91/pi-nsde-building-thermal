@@ -1,4 +1,4 @@
-"""Physics-informed neural SDE for building thermal identification."""
+"""Gray-box SDE for identifiability of lumped building thermal parameters from thermostat runtime."""
 
 from pi_nsde_building_thermal.io import load_checkpoint, load_timeseries_csv, save_checkpoint
 from pi_nsde_building_thermal.model import canonicalize_hvac

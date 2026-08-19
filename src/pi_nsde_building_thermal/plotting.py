@@ -77,17 +77,17 @@ def plot_example(
             lw=0.7,
             ls="--",
             alpha=0.45,
-            label="True delivered kW (eval only; unused in fit)",
+            label="Plant Q_hvac (eval only; unused in fit)",
         )
         ax2 = ax.twinx()
         ax2.plot(t, on_frac, color="#ff7f0e", lw=0.7, alpha=0.7, label="signed runtime (observed)")
         ax2.set_ylabel("HVAC signed runtime")
         ymin = -1.15 if float(np.min(on_frac)) < -1e-3 else -0.05
         ax2.set_ylim(ymin, 1.15)
-        ax.set_title("Observed runtime; capacity identified (true kW unused)")
+        ax.set_title("Observed runtime; rated capacity identified (true HVAC power unused)")
     else:
-        ax.plot(t, np.asarray(data.q_hvac_kw), color="#c44e52", lw=0.9, label="Q_hvac (known kW)")
-        ax.set_title("Known HVAC vs latent occupancy (hidden Q_int not used in fit)")
+        ax.plot(t, np.asarray(data.q_hvac_kw), color="#c44e52", lw=0.9, label="Metered Q_hvac")
+        ax.set_title("Metered HVAC power vs latent occupancy (hidden Q_int not used in fit)")
     ax.plot(t, np.asarray(data.q_int_kw), color="0.45", lw=0.8, label="Q_int true (eval only)")
     q_tr = np.asarray(uq.q_mean)
     q_sd = np.asarray(uq.q_sd_state)
@@ -143,7 +143,7 @@ def plot_example(
     ax.set_title("Train only (joint Laplace, sum NLL)")
     ax.legend(fontsize=8)
 
-    mode = "unknown Q_rated (on/off only)" if unknown else "known HVAC kW"
+    mode = "unknown Q_rated (runtime only)" if unknown else "metered HVAC power"
     fig.suptitle(f"pi-nsde-building-thermal identification — chronological holdout, two-stage, {mode}", fontsize=11)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

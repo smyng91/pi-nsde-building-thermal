@@ -9,8 +9,9 @@ Q_int  latent internal-gain / occupancy process [kW]
              + σ_T(u) dW_T
     dQ_int = κ (μ(t) - Q_int) dt + σ_q dW_Q
 
-Q_hvac is an exogenous input: either metered kW (known-Q_rated protocol) or
-``Q_rated * u`` with observed signed interval runtime ``u ∈ [-1, 1]``
+Q_hvac(t) is delivered HVAC power into the node [kW]: either the metered
+plant series (metered-Q_hvac protocol) or ``Q_rated * u`` with a learned
+constant rated capacity and observed signed runtime ``u ∈ [-1, 1]``
 (positive heating, negative cooling). HVAC on/off is never a latent switching
 mode. Observations are interval averages of T, not Dirac samples at the endpoints.
 """
@@ -236,7 +237,7 @@ def interval_average_open_loop(
 
     Same affine maps as Euler--Maruyama with σ_T = σ_q = 0: an explicit Euler
     ODE step, not a stochastic integrator. Exogenous inputs only: weather and
-    known HVAC. Indoor T is not an input.
+    HVAC power. Indoor T is not an input.
     """
     n = t_out_c.shape[0]
     ua = envelope_ua_kw_per_k(params.R, wind_m_s)
